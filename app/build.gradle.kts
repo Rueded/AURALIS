@@ -7,14 +7,13 @@ plugins {
 
 android {
     namespace = "com.example.mymusic"
-    compileSdk {
-        version = release(36)
-    }
+    // 👇 跟随最新时代，直接拉到 API 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.mymusic"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 36 // 👇 目标也对齐 37
         versionCode = 1
         versionName = "1.0"
 
@@ -51,19 +50,25 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    // 引入 Media3 核心播放器和 Session 服务
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
-    implementation("androidx.media3:media3-session:1.3.1")
+
+    // 👇 听哥哥的！直接上 Media3 1.10.0 满血最新版！
+    val media3Version = "1.10.0"
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-session:$media3Version")
+
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.google.code.gson:gson:2.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
-    val room_version = "2.6.1"
-    implementation("androidx.room:room-runtime:$room_version")
-    implementation("androidx.room:room-ktx:$room_version") // 为 Room 提供协程和 Flow 支持
-    ksp("androidx.room:room-compiler:$room_version")
+
+    val roomVersion = "2.6.1" // Room 目前非常稳定，这个版本就足够强悍啦
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+
     implementation("net.jthink:jaudiotagger:3.0.1")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

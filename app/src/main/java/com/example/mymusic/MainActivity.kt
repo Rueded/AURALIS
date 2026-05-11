@@ -526,6 +526,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     val allPlaylists by dao.getAllPlaylists().collectAsState(initial = emptyList())
     var enableReplayGain by remember { mutableStateOf(prefs.getBoolean("enable_replay_gain", false)) }
 
+    // 👇 新增：USB Bit-perfect 开关状态
+    var enableBitPerfect by remember { mutableStateOf(prefs.getBoolean("enable_bit_perfect", false)) }
+
     var pcServerIp by remember { mutableStateOf(prefs.getString("server_ip", "192.168.") ?: "192.168.") }
     var savedFolderUriStr by remember { mutableStateOf(prefs.getString("sync_folder", null)) }
     var allowedFolders by remember { mutableStateOf(prefs.getStringSet("allowed_folders", setOf()) ?: setOf()) }
@@ -1305,6 +1308,43 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
+                    // 👇👇👇 新增：USB Bit-perfect 源码直通开关 👇👇👇
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            enableBitPerfect = !enableBitPerfect
+                            prefs.edit().putBoolean("enable_bit_perfect", enableBitPerfect).apply()
+                            // 立即通知后台服务应用新设置
+                            PlaybackService.instance?.applyUsbBitPerfectSetting(enableBitPerfect)
+
+                            if (enableBitPerfect && Build.VERSION.SDK_INT < 34) {
+                                Toast.makeText(context, "您的系统低于 Android 14，不支持此功能", Toast.LENGTH_SHORT).show()
+                            } else if (enableBitPerfect) {
+                                Toast.makeText(context, "已开启源码直通，请连接 USB DAC", Toast.LENGTH_SHORT).show()
+                            }
+                        }.padding(vertical = 12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("USB 源码直通 (Bit-perfect)", fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyLarge)
+                            Text("绕过安卓混音器，仅支持 Android 14+ 及外接 DAC", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = enableBitPerfect,
+                            onCheckedChange = { isChecked ->
+                                enableBitPerfect = isChecked
+                                prefs.edit().putBoolean("enable_bit_perfect", isChecked).apply()
+                                PlaybackService.instance?.applyUsbBitPerfectSetting(isChecked)
+
+                                if (isChecked && Build.VERSION.SDK_INT < 34) {
+                                    Toast.makeText(context, "您的系统低于 Android 14，不支持此功能", Toast.LENGTH_SHORT).show()
+                                } else if (isChecked) {
+                                    Toast.makeText(context, "已开启源码直通，请连接 USB DAC", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    // 👆👆👆 结束新增 👆👆👆
                     // 👇👇👇 2. PC 有线音箱模式 (新增) 👇👇👇
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
