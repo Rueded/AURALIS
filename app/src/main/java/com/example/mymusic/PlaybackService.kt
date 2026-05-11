@@ -24,6 +24,9 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.collect.ImmutableList
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -31,83 +34,87 @@ class PlaybackService : MediaSessionService() {
     companion object {
         var audioSessionId: Int = 0
         var instance: PlaybackService? = null
+
+        // ── [修复3] 对外暴露 Bit-perfect 状态，UI 可直接 collect 观察 ──
+        private val _bitPerfectState = MutableStateFlow(false)
+        val bitPerfectState: StateFlow<Boolean> = _bitPerfectState.asStateFlow()
     }
 
     private var mediaSession: MediaSession? = null
     private lateinit var audioManager: AudioManager
     private var isCurrentlyBitPerfect: Boolean = false
 
+    // ── [修复2] 持有 player 引用，以便 Bit-perfect 状态变化时动态切换 Offload ──
+    private var player: ExoPlayer? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-        // ── 1. 强开 32-bit Float 高精度输出 (适配最新版 Media3 签名变更) ──
+        // ── 1. 强开 32-bit Float 高精度输出 ──
+        // [修复2] Float 输出和 Offload 互斥：Float 输出路径作为默认，
+        //         Offload 仅在 Bit-perfect 关闭时启用（见 applyOffloadPreference）
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context,
                 enableFloatOutput: Boolean,
-                enableAudioOutputPlaybackParams: Boolean // 🚨 完美匹配新版 API 的命名，且去掉了 offload 参数
+                enableAudioOutputPlaybackParams: Boolean
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(true) // 核心：强制开启 32位浮点数输出，保护母带动态范围
+                    .setEnableFloatOutput(true) // 32bit 浮点，保护动态范围
                     .build()
             }
         }
 
-        // ── 2. 新增：高码率 FLAC/WAV 解码缓冲优化 ──
+        // ── 2. 高码率 FLAC/WAV 解码缓冲优化 ──
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                50000,  // 最小缓冲 50 秒
-                100000, // 🚨 最大缓冲 100 秒（专为 Hi-Res 大体积无损文件防卡顿准备）
-                2500,   // 播放所需最小缓冲
-                5000    // 重新缓冲所需时间
+                50000,
+                100000,
+                2500,
+                5000
             ).build()
 
-        // ── 3. 新增：空间音频 (Spatializer) API 融合 ──
+        // ── 3. 空间音频 Spatializer ──
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
-            .setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_AUTO) // 🚨 智能多声道路由分配
+            .setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_AUTO)
             .build()
 
-        // ── 4. 构建 ExoPlayer，注入所有超强配置 ──
-        val player = ExoPlayer.Builder(this, renderersFactory)
+        // ── 4. 构建 ExoPlayer ──
+        val builtPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setAudioAttributes(audioAttributes, true)
-            .setLoadControl(loadControl) // 应用大缓冲控制
+            .setLoadControl(loadControl)
             .build()
 
-        // ── 5. 配置 Audio Offload (硬件级别的无缝播放与低功耗直通) ──
-        val audioOffloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
-            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
-            .setIsGaplessSupportRequired(true)
-            .build()
+        player = builtPlayer
+        audioSessionId = builtPlayer.audioSessionId
 
-        player.trackSelectionParameters = player.trackSelectionParameters
-            .buildUpon()
-            .setAudioOffloadPreferences(audioOffloadPreferences)
-            .build()
+        // ── 5. 读取持久化设置，决定初始是否启用 Bit-perfect ──
+        val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+        val isBitPerfectEnabled = prefs.getBoolean("enable_bit_perfect", false)
 
-        // 保存 SessionId 供均衡器全局使用
-        audioSessionId = player.audioSessionId
+        // [修复2] 先根据 Bit-perfect 开关决定 Offload 策略，再激活 Bit-perfect
+        applyOffloadPreference(builtPlayer, enableOffload = !isBitPerfectEnabled)
+        applyUsbBitPerfectSetting(isBitPerfectEnabled)
 
-        // ── 6. 点击通知栏跳转回全屏播放器 ──
+        // ── 6. 通知栏跳转 ──
         val sessionActivityIntent = Intent(this, MainActivity::class.java).apply {
             action = "OPEN_PLAYER_FULLSCREEN"
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val sessionActivityPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            sessionActivityIntent,
+            this, 0, sessionActivityIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaSession.Builder(this, builtPlayer)
             .setSessionActivity(sessionActivityPendingIntent)
             .build()
 
-        // ── 7. 定制媒体通知栏 (保持极简) ──
+        // ── 7. 定制媒体通知栏 ──
         val notificationProvider = object : DefaultMediaNotificationProvider(this) {
             override fun getMediaButtons(
                 session: MediaSession,
@@ -115,32 +122,70 @@ class PlaybackService : MediaSessionService() {
                 customLayout: ImmutableList<CommandButton>,
                 showPauseButton: Boolean
             ): ImmutableList<CommandButton> {
-                val defaultButtons = super.getMediaButtons(session, playerCommands, customLayout, showPauseButton)
-                val filteredList = defaultButtons.filter {
-                    it.playerCommand != Player.COMMAND_SEEK_FORWARD &&
-                            it.playerCommand != Player.COMMAND_SEEK_BACK
-                }
-                return ImmutableList.copyOf(filteredList)
+                return ImmutableList.copyOf(
+                    super.getMediaButtons(session, playerCommands, customLayout, showPauseButton)
+                        .filter {
+                            it.playerCommand != Player.COMMAND_SEEK_FORWARD &&
+                                    it.playerCommand != Player.COMMAND_SEEK_BACK
+                        }
+                )
             }
         }
         notificationProvider.setSmallIcon(R.drawable.ic_notification_logo)
         setMediaNotificationProvider(notificationProvider)
-
-        // ── 8. 初始化时读取并应用 USB 独占设置 ──
-        val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
-        val isBitPerfectEnabled = prefs.getBoolean("enable_bit_perfect", false)
-        applyUsbBitPerfectSetting(isBitPerfectEnabled)
     }
 
     // ==========================================
-    // 🚀 Android 14+ 专属：USB Bit-perfect 源码直通控制
+    // [修复2] Float 输出与 Offload 互斥控制
+    // Bit-perfect 开启时禁用 Offload（Offload 路径不支持 float PCM 直通）
+    // Bit-perfect 关闭时恢复 Offload（节省功耗）
     // ==========================================
-    fun applyUsbBitPerfectSetting(enable: Boolean) {
-        if (Build.VERSION.SDK_INT < 34) return
-        if (enable) tryEnableUsbBitPerfect() else tryDisableUsbBitPerfect()
+    private fun applyOffloadPreference(targetPlayer: ExoPlayer, enableOffload: Boolean) {
+        val mode = if (enableOffload)
+            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+        else
+            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+
+        val offloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
+            .setAudioOffloadMode(mode)
+            .setIsGaplessSupportRequired(enableOffload) // 无缝播放仅在 Offload 启用时有意义
+            .build()
+
+        targetPlayer.trackSelectionParameters = targetPlayer.trackSelectionParameters
+            .buildUpon()
+            .setAudioOffloadPreferences(offloadPreferences)
+            .build()
+
+        Log.d("Auralis", "Offload 模式: ${if (enableOffload) "已启用" else "已禁用（Bit-perfect 路径）"}")
     }
 
-    private fun tryEnableUsbBitPerfect() {
+    // ==========================================
+    // Android 14+ 专属：USB Bit-perfect 控制
+    // [修复1] 新增 sampleRate / bitDepth 参数，动态匹配实际曲目规格
+    //         而非硬编码 192kHz / 24bit
+    // ==========================================
+
+    /**
+     * @param enable       是否启用 Bit-perfect 模式
+     * @param sampleRate   当前曲目实际采样率（Hz），0 表示自动从 DAC 获取最优值
+     * @param bitDepth     当前曲目实际位深，0 表示自动选择
+     */
+    fun applyUsbBitPerfectSetting(enable: Boolean, sampleRate: Int = 0, bitDepth: Int = 0) {
+        if (Build.VERSION.SDK_INT < 34) {
+            Log.w("Auralis", "USB Bit-perfect 需要 Android 14+，当前系统不支持")
+            return
+        }
+        if (enable) {
+            tryEnableUsbBitPerfect(sampleRate, bitDepth)
+        } else {
+            tryDisableUsbBitPerfect()
+        }
+
+        // [修复2] Bit-perfect 状态变化时同步调整 Offload
+        player?.let { applyOffloadPreference(it, enableOffload = !isCurrentlyBitPerfect) }
+    }
+
+    private fun tryEnableUsbBitPerfect(requestedSampleRate: Int, requestedBitDepth: Int) {
         if (isCurrentlyBitPerfect || Build.VERSION.SDK_INT < 34) return
 
         try {
@@ -148,36 +193,44 @@ class PlaybackService : MediaSessionService() {
             val usbDac = devices.firstOrNull {
                 it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
                         it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            } ?: run {
+                Log.w("Auralis", "未检测到 USB DAC，Bit-perfect 模式未激活")
+                return
             }
 
-            if (usbDac != null) {
-                val mixerAttributes = AudioMixerAttributes.Builder(
-                    android.media.AudioFormat.Builder()
-                        .setSampleRate(192000)
-                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED)
-                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO)
-                        .build()
-                )
-                    // 绕过 Android AudioFlinger，实现 Bit-perfect
-                    .setMixerBehavior(AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT)
+            // ── [修复1] 动态选择采样率：优先用曲目实际值，其次用 DAC 支持的最高值 ──
+            val targetSampleRate = resolveBestSampleRate(usbDac, requestedSampleRate)
+            val targetEncoding = resolveBestEncoding(usbDac, requestedBitDepth)
+
+            Log.d("Auralis", "Bit-perfect 目标规格：${targetSampleRate}Hz / ${encodingLabel(targetEncoding)}")
+
+            val mixerAttributes = AudioMixerAttributes.Builder(
+                android.media.AudioFormat.Builder()
+                    .setSampleRate(targetSampleRate)
+                    .setEncoding(targetEncoding)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO)
                     .build()
+            )
+                .setMixerBehavior(AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT)
+                .build()
 
-                val audioAttributes = android.media.AudioAttributes.Builder()
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .build()
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .build()
 
-                val success = audioManager.setPreferredMixerAttributes(
-                    audioAttributes,
-                    usbDac,
-                    mixerAttributes
-                )
+            val success = audioManager.setPreferredMixerAttributes(
+                audioAttributes, usbDac, mixerAttributes
+            )
 
-                if (success) {
-                    isCurrentlyBitPerfect = true
-                    Log.d("Auralis", "🎶 USB Bit-perfect 模式已成功激活，独占输出中！")
-                }
+            if (success) {
+                isCurrentlyBitPerfect = true
+                _bitPerfectState.value = true  // [修复3] 通知 UI
+                Log.d("Auralis", "✅ USB Bit-perfect 已激活：${targetSampleRate}Hz / ${encodingLabel(targetEncoding)}")
+            } else {
+                Log.w("Auralis", "⚠️ setPreferredMixerAttributes 返回 false，DAC 可能不支持该规格")
             }
+
         } catch (e: Exception) {
             Log.e("Auralis", "激活 USB Bit-perfect 失败: ${e.message}")
         }
@@ -200,12 +253,67 @@ class PlaybackService : MediaSessionService() {
                     .build()
 
                 audioManager.clearPreferredMixerAttributes(audioAttributes, usbDac)
-                isCurrentlyBitPerfect = false
-                Log.d("Auralis", "🛑 已关闭 USB Bit-perfect，恢复 Android 系统混音。")
             }
+
+            isCurrentlyBitPerfect = false
+            _bitPerfectState.value = false  // [修复3] 通知 UI
+            Log.d("Auralis", "🛑 USB Bit-perfect 已关闭，恢复系统混音")
+
         } catch (e: Exception) {
             Log.e("Auralis", "关闭 USB Bit-perfect 失败: ${e.message}")
         }
+    }
+
+    // ── [修复1] 采样率决策：曲目实际值 → DAC 最高支持值 → 安全回退 48kHz ──
+    private fun resolveBestSampleRate(usbDac: AudioDeviceInfo, requested: Int): Int {
+        val dacRates = usbDac.sampleRates  // DAC 硬件支持的所有采样率
+        if (dacRates.isEmpty()) {
+            // DAC 没有上报支持列表，直接用请求值或 48kHz 回退
+            return if (requested > 0) requested else 48000
+        }
+
+        // 如果曲目采样率 DAC 支持，直接用
+        if (requested > 0 && dacRates.contains(requested)) return requested
+
+        // 否则用 DAC 支持的最高采样率（最大化 Bit-perfect 质量）
+        return dacRates.max()
+    }
+
+    // ── [修复1] 位深决策：曲目实际值映射到 AudioFormat Encoding ──
+    private fun resolveBestEncoding(usbDac: AudioDeviceInfo, requestedBitDepth: Int): Int {
+        val dacEncodings = usbDac.encodings
+
+        // 按质量从高到低的候选列表
+        val candidates = when {
+            requestedBitDepth >= 32 -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_32BIT,
+                android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            requestedBitDepth >= 24 -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            else -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_16BIT,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT
+            )
+        }
+
+        if (dacEncodings.isEmpty()) return candidates.first()
+
+        // 找 DAC 支持的第一个候选
+        return candidates.firstOrNull { dacEncodings.contains(it) } ?: android.media.AudioFormat.ENCODING_PCM_16BIT
+    }
+
+    private fun encodingLabel(encoding: Int): String = when (encoding) {
+        android.media.AudioFormat.ENCODING_PCM_32BIT       -> "32bit"
+        android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED -> "24bit"
+        android.media.AudioFormat.ENCODING_PCM_FLOAT       -> "32bit Float"
+        android.media.AudioFormat.ENCODING_PCM_16BIT       -> "16bit"
+        else -> "unknown"
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -216,6 +324,7 @@ class PlaybackService : MediaSessionService() {
         mediaSession?.player?.release()
         mediaSession?.release()
         mediaSession = null
+        player = null
         super.onDestroy()
     }
 }
