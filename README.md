@@ -26,13 +26,6 @@ Auralis 致力于打破 Android 底层音频接口的妥协，为你呈现音乐
 *   **音频解析**: MediaExtractor, MediaMetadataRetriever, jaudiotagger (或同类底层解析库)
 *   **图片加载**: 原生 Bitmap 高效解码与 WEBP 压缩
 
-## 📸 屏幕截图 (Screenshots)
-
-*(在这里放几张 Auralis 的截图，建议包含：带有 DSD/Master 标签的丝滑歌曲列表、炫酷的播放界面、以及那个充满硬核数据的详细信息面板)*
-
-| 歌曲列表 (List) | 播放界面 (Player) | 详情面板 (Info) |
-| :---: | :---: | :---: |
-| <img src="URL_TO_IMAGE" width="250"/> | <img src="URL_TO_IMAGE" width="250"/> | <img src="URL_TO_IMAGE" width="250"/> |
 
 ## 🚀 核心架构亮点 (Architecture Highlight)
 
