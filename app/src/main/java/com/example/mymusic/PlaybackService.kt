@@ -223,12 +223,21 @@ class PlaybackService : MediaSessionService() {
                 audioAttributes, usbDac, mixerAttributes
             )
 
+            // 👇 新增：获取主线程 Handler 来弹 Toast
+            val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
             if (success) {
                 isCurrentlyBitPerfect = true
-                _bitPerfectState.value = true  // [修复3] 通知 UI
+                _bitPerfectState.value = true  // 通知 UI
                 Log.d("Auralis", "✅ USB Bit-perfect 已激活：${targetSampleRate}Hz / ${encodingLabel(targetEncoding)}")
+                mainHandler.post {
+                    android.widget.Toast.makeText(this, "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz", android.widget.Toast.LENGTH_SHORT).show()
+                }
             } else {
                 Log.w("Auralis", "⚠️ setPreferredMixerAttributes 返回 false，DAC 可能不支持该规格")
+                mainHandler.post {
+                    android.widget.Toast.makeText(this, "DAC 独占失败: 设备不支持该规格", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
 
         } catch (e: Exception) {
@@ -258,6 +267,14 @@ class PlaybackService : MediaSessionService() {
             isCurrentlyBitPerfect = false
             _bitPerfectState.value = false  // [修复3] 通知 UI
             Log.d("Auralis", "🛑 USB Bit-perfect 已关闭，恢复系统混音")
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(
+                    this,
+                    "已恢复 Android 系统混音",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
 
         } catch (e: Exception) {
             Log.e("Auralis", "关闭 USB Bit-perfect 失败: ${e.message}")

@@ -164,7 +164,6 @@ object AudioCache {
             memoryCache.get(song.data)?.let { return@withLock it }
 
             val info = withContext(Dispatchers.IO) {
-                // 👇 【防爆红核心：把这三个兄弟全部放在最顶层定义，后面随便怎么用都不会找不到】
                 var resultSpec = AudioSpec()
                 var resultBitmap: Bitmap? = null
                 var isDatabaseReady = false
@@ -225,7 +224,7 @@ object AudioCache {
                         if (dbSong != null) {
                             if (dbSong.bitDepth > 0) {
                                 rawBitDepth = dbSong.bitDepth
-                                isDatabaseReady = true // 👈 数据库有值了，亮起绿灯！
+                                isDatabaseReady = true
                             }
                             if (dbSong.samplingRate > 0) {
                                 rawSampleRate = dbSong.samplingRate
@@ -250,37 +249,45 @@ object AudioCache {
 
                     try {
                         if (picData != null) {
+                            // 1. 优先使用本地物理内嵌封面
                             val options = BitmapFactory.Options().apply {
                                 inSampleSize = 2
                                 inPreferredConfig = Bitmap.Config.RGB_565
                             }
                             resultBitmap = BitmapFactory.decodeByteArray(picData, 0, picData.size, options)
                         } else {
-                            // 🚨 终极防毒过滤：判断是否为系统虚构的未知专辑
-                            val isUnknown = albumStr.isEmpty() ||
-                                    albumStr.equals("Unknown", ignoreCase = true) ||
-                                    albumStr.equals("Unknown album", ignoreCase = true) ||
-                                    albumStr.equals("Music", ignoreCase = true)
+                            // 🚨 2. 本地没有图片？呼叫神级爬虫去网上扒高清原图！
+                            // 为了不卡住列表滑动，这里通过协程挂起，在 IO 线程去下载
+                            resultBitmap = CoverFetcher.fetchHighResCover(song.title, song.artist)
 
-                            // 只有名字正常的专辑，才允许向系统 MediaStore 要图片！
-                            if (!isUnknown) {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
-                                    val bmp = context.contentResolver.loadThumbnail(uri, android.util.Size(400, 400), null)
-                                    resultBitmap = bmp.copy(Bitmap.Config.RGB_565, false)
-                                } else {
-                                    val artUri = android.net.Uri.parse("content://media/external/audio/albumart/${song.albumId}")
-                                    context.contentResolver.openInputStream(artUri)?.use { stream ->
-                                        val options = BitmapFactory.Options().apply {
-                                            inSampleSize = 2
-                                            inPreferredConfig = Bitmap.Config.RGB_565
+                            // 3. 如果连网络都没找到，再走原来的 MediaStore 兜底逻辑
+                            if (resultBitmap == null) {
+                                val isUnknown = albumStr.isEmpty() ||
+                                        albumStr.equals("Unknown", ignoreCase = true) ||
+                                        albumStr.equals("Unknown album", ignoreCase = true) ||
+                                        albumStr.equals("Music", ignoreCase = true)
+
+                                if (!isUnknown) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
+                                        val bmp = context.contentResolver.loadThumbnail(uri, android.util.Size(400, 400), null)
+                                        resultBitmap = bmp.copy(Bitmap.Config.RGB_565, false)
+                                    } else {
+                                        val artUri = android.net.Uri.parse("content://media/external/audio/albumart/${song.albumId}")
+                                        context.contentResolver.openInputStream(artUri)?.use { stream ->
+                                            val options = BitmapFactory.Options().apply {
+                                                inSampleSize = 2
+                                                inPreferredConfig = Bitmap.Config.RGB_565
+                                            }
+                                            resultBitmap = BitmapFactory.decodeStream(stream, null, options)
                                         }
-                                        resultBitmap = BitmapFactory.decodeStream(stream, null, options)
                                     }
                                 }
                             }
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e("AudioCache", "提取或下载图片异常: ${e.message}")
+                    }
 
                 } catch (e: Exception) {
                     Log.e("AudioCache", "提取元数据失败", e)
@@ -292,7 +299,6 @@ object AudioCache {
                 val safeKey = song.data.hashCode().toString()
 
                 try {
-                    // 👇 刚才最上面定义的 isDatabaseReady 和 resultSpec 在这里直接拿来用
                     val isPotentiallyWrong = resultSpec.isLossless && resultSpec.bitDepth <= 16 && !isDatabaseReady
                     val shouldCache = !isPotentiallyWrong
 
@@ -300,6 +306,7 @@ object AudioCache {
                         File(cacheDir, "$safeKey.txt").writeText(
                             "${resultSpec.format}|${resultSpec.bitRate}|${resultSpec.sampleRate}|${resultSpec.bitDepth}|${resultSpec.channels}"
                         )
+                        // 🚨 重点：无论是本地还是网上下载的封面，都会在这里被压缩保存到手机里！
                         if (resultBitmap != null) {
                             File(cacheDir, "$safeKey.webp").outputStream().use {
                                 resultBitmap!!.compress(Bitmap.CompressFormat.WEBP, 90, it)
@@ -613,7 +620,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         "dsd" to listOf(".dsf", ".dff")
     )
 
-    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
     var showSelectionDialog by remember { mutableStateOf(false) }
     var showDownloadingDialog by remember { mutableStateOf(false) }
     var missingSongsList by remember { mutableStateOf<List<SyncItem>>(emptyList()) }
@@ -759,7 +766,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             savedFolderUriStr = uri.toString()
             prefs.edit().putString("sync_folder", uri.toString()).apply()
-            showSettingsDialog = false; fetchSongsList()
+            showSettingsScreen = false; fetchSongsList()
         }
     }
 
@@ -972,8 +979,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
                     }
                 }
-                IconButton(onClick = { showSettingsDialog = true }) { Icon(Icons.Filled.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                FilledTonalIconButton(onClick = { if (pcServerIp.endsWith(".") || savedFolderUriStr == null) showSettingsDialog = true else fetchSongsList() }, modifier = Modifier.size(52.dp)) { Icon(Icons.Filled.Sync, "Sync") }
+                IconButton(onClick = { showSettingsScreen = true }) { Icon(Icons.Filled.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                FilledTonalIconButton(onClick = { if (pcServerIp.endsWith(".") || savedFolderUriStr == null) showSettingsScreen = true else fetchSongsList() }, modifier = Modifier.size(52.dp)) { Icon(Icons.Filled.Sync, "Sync") }
             }
 
             ScrollableTabRow(
@@ -1274,179 +1281,70 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         )
     }
 
-    if (showSettingsDialog) {
-        // 记得在作用域顶部确保有这个变量定义：
-        // var isPcMode by remember { mutableStateOf(PcAudioReceiver.isReceiving) }
-
-        AlertDialog(
-            onDismissRequest = { showSettingsDialog = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text("音乐管家设置", fontWeight = FontWeight.W600) },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-                    // 1. 音量标准化
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            enableReplayGain = !enableReplayGain
-                            prefs.edit().putBoolean("enable_replay_gain", enableReplayGain).apply()
-                            if (!enableReplayGain) mediaController?.setVolume(1.0f)
-                        }.padding(vertical = 12.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("音量标准化 (ReplayGain)", fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyLarge)
-                            Text("自动平衡不同歌曲响度，保护听力", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = enableReplayGain,
-                            onCheckedChange = {
-                                enableReplayGain = it
-                                prefs.edit().putBoolean("enable_replay_gain", it).apply()
-                                if (!it) mediaController?.setVolume(1.0f)
-                            }
-                        )
+    AnimatedContent(
+        targetState = showSettingsScreen,
+        transitionSpec = {
+            if (targetState) {
+                slideInHorizontally { it }.togetherWith(slideOutHorizontally { -it / 3 })
+            } else {
+                slideInHorizontally { -it / 3 }.togetherWith(slideOutHorizontally { it })
+            }
+        }, label = "settingsTransition"
+    ) { showSettings ->
+        if (showSettings) {
+            SettingsScreen(
+                onBack = { showSettingsScreen = false },
+                enableReplayGain = enableReplayGain,
+                onReplayGainChange = {
+                    enableReplayGain = it
+                    prefs.edit().putBoolean("enable_replay_gain", it).apply()
+                    if (!it) mediaController?.setVolume(1.0f)
+                },
+                enableBitPerfect = enableBitPerfect,
+                onBitPerfectChange = {
+                    enableBitPerfect = it
+                    prefs.edit().putBoolean("enable_bit_perfect", it).apply()
+                    PlaybackService.instance?.applyUsbBitPerfectSetting(it)
+                },
+                isPcMode = isPcMode,
+                onPcModeChange = {
+                    if (it) {
+                        scope.launch(Dispatchers.IO) { PcAudioReceiver.startListening() }
+                        isPcMode = true
+                    } else {
+                        PcAudioReceiver.stop()
+                        isPcMode = false
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                    // 👇👇👇 新增：USB Bit-perfect 源码直通开关 👇👇👇
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            enableBitPerfect = !enableBitPerfect
-                            prefs.edit().putBoolean("enable_bit_perfect", enableBitPerfect).apply()
-                            // 立即通知后台服务应用新设置
-                            PlaybackService.instance?.applyUsbBitPerfectSetting(enableBitPerfect)
-
-                            if (enableBitPerfect && Build.VERSION.SDK_INT < 34) {
-                                Toast.makeText(context, "您的系统低于 Android 14，不支持此功能", Toast.LENGTH_SHORT).show()
-                            } else if (enableBitPerfect) {
-                                Toast.makeText(context, "已开启源码直通，请连接 USB DAC", Toast.LENGTH_SHORT).show()
-                            }
-                        }.padding(vertical = 12.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("USB 源码直通 (Bit-perfect)", fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyLarge)
-                            Text("绕过安卓混音器，仅支持 Android 14+ 及外接 DAC", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = enableBitPerfect,
-                            onCheckedChange = { isChecked ->
-                                enableBitPerfect = isChecked
-                                prefs.edit().putBoolean("enable_bit_perfect", isChecked).apply()
-                                PlaybackService.instance?.applyUsbBitPerfectSetting(isChecked)
-
-                                if (isChecked && Build.VERSION.SDK_INT < 34) {
-                                    Toast.makeText(context, "您的系统低于 Android 14，不支持此功能", Toast.LENGTH_SHORT).show()
-                                } else if (isChecked) {
-                                    Toast.makeText(context, "已开启源码直通，请连接 USB DAC", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        )
+                },
+                pcServerIp = pcServerIp,
+                onPcServerIpChange = { pcServerIp = it; prefs.edit().putString("server_ip", it).apply() },
+                allowedFolders = allowedFolders,
+                onFolderAdded = { folder ->
+                    val newSet = allowedFolders.toMutableSet().apply { add(folder) }
+                    allowedFolders = newSet
+                    prefs.edit().putStringSet("allowed_folders", newSet).apply()
+                    scope.launch { MusicUtils.syncLocalMusicToDatabase(context, dao, newSet) }
+                },
+                onFolderRemoved = { folder ->
+                    val newSet = allowedFolders.toMutableSet().apply { remove(folder) }
+                    allowedFolders = newSet
+                    prefs.edit().putStringSet("allowed_folders", newSet).apply()
+                    scope.launch { MusicUtils.syncLocalMusicToDatabase(context, dao, newSet) }
+                },
+                onRescanLibrary = {
+                    scope.launch(Dispatchers.IO) {
+                        withContext(Dispatchers.Main) { Toast.makeText(context, "开始深度解析...", Toast.LENGTH_SHORT).show() }
+                        File(context.cacheDir, "audio_meta_cache").deleteRecursively()
+                        db.openHelper.writableDatabase.execSQL("DELETE FROM songs")
+                        MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
+                        withContext(Dispatchers.Main) { Toast.makeText(context, "深度解析完成！", Toast.LENGTH_LONG).show() }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    // 👆👆👆 结束新增 👆👆👆
-                    // 👇👇👇 2. PC 有线音箱模式 (新增) 👇👇👇
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            if (isPcMode) {
-                                PcAudioReceiver.stop()
-                                isPcMode = false
-                            } else {
-                                scope.launch(Dispatchers.IO) { PcAudioReceiver.startListening() }
-                                isPcMode = true
-                            }
-                        }.padding(vertical = 12.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("PC 有线音箱模式", fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyLarge, color = if(isPcMode) MaterialTheme.colorScheme.primary else Color.Unspecified)
-                            Text(if (isPcMode) "正在监听端口 (USB 传输中)" else "将手机变为 PC 的零延迟音箱", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = isPcMode,
-                            onCheckedChange = {
-                                if (it) {
-                                    scope.launch(Dispatchers.IO) { PcAudioReceiver.startListening() }
-                                    isPcMode = true
-                                } else {
-                                    PcAudioReceiver.stop()
-                                    isPcMode = false
-                                }
-                            }
-                        )
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    // 👆👆👆 结束新增 👆👆👆
-
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(value = pcServerIp, onValueChange = { pcServerIp = it; prefs.edit().putString("server_ip", it).apply() }, label = { Text("电脑局域网 IP") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-
-                    Spacer(Modifier.height(16.dp))
-                    Text("同步保存路径", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { folderPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) { Text(if (savedFolderUriStr != null) "修改下载文件夹" else "选择下载文件夹") }
-
-                    Spacer(Modifier.height(16.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                    Spacer(Modifier.height(16.dp))
-                    Text("本地扫描白名单", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    if (allowedFolders.isEmpty()) Text("当前扫描全盘", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    allowedFolders.forEach { folder ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Text(folder, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            IconButton(onClick = { val newSet = allowedFolders.toMutableSet().apply { remove(folder) }; allowedFolders = newSet; prefs.edit().putStringSet("allowed_folders", newSet).apply(); scope.launch { MusicUtils.syncLocalMusicToDatabase(context, dao, newSet) } }) { Icon(Icons.Filled.Close, "Remove", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) }
-                        }
-                    }
-                    OutlinedButton(onClick = { scanWhitelistLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) { Text("添加扫描路径") }
-
-                    Spacer(Modifier.height(16.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedButton(onClick = { batchLrcPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Subtitles, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("批量导入 LRC 歌词")
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                withContext(Dispatchers.Main) { Toast.makeText(context, "正在清空旧数据，开始深度解析...", Toast.LENGTH_SHORT).show() }
-                                File(context.cacheDir, "audio_meta_cache").deleteRecursively()
-                                db.openHelper.writableDatabase.execSQL("DELETE FROM songs")
-                                MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "深度解析完成！", Toast.LENGTH_LONG).show()
-                                    showSettingsDialog = false
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("强制深度解析全部歌曲") }
-
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            duplicatesList = allSongs.groupBy { song ->
-                                val titleNorm = song.title.trim().lowercase()
-                                val artistNorm = song.artist.trim().lowercase()
-                                if (titleNorm != "未知歌名" && titleNorm.isNotEmpty()) "${titleNorm}_${artistNorm}"
-                                else song.data.substringAfterLast("/").substringBeforeLast(".").trim().lowercase()
-                            }.filter { it.value.size > 1 }.values.toList()
-
-                            if (duplicatesList.isEmpty()) Toast.makeText(context, "未发现重复歌曲", Toast.LENGTH_SHORT).show()
-                            else { showSettingsDialog = false; showDuplicateDialog = true }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("智能检测重复歌曲") }
-                    Spacer(Modifier.height(8.dp))
-                }
-            },
-            confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("完成") } }
-        )
+                },
+                onBatchImportLrc = { batchLrcPicker.launch(arrayOf("*/*")) },
+                onShowSleepTimer = { showSleepTimerDialog = true }
+            )
+            BackHandler { showSettingsScreen = false }
+        }
     }
 
     if (showDuplicateDialog) {
@@ -1957,6 +1855,11 @@ fun FullScreenPlayer(
         var lrcLines by remember { mutableStateOf<List<LrcLine>>(emptyList()) }
         var showLyrics by remember { mutableStateOf(false) }
         var isFullscreenLyrics by remember { mutableStateOf(false) }
+        var lyricsSource by remember { mutableStateOf(LyricsSource.LOCAL) }
+        val enableOnlineLyrics = remember {
+            context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+                .getBoolean("enable_online_lyrics", true)
+        }
         val listState = rememberLazyListState()
         val isUserDraggingLyrics by listState.interactionSource.collectIsDraggedAsState()
         var isLyricsPausedForInteraction by remember { mutableStateOf(false) }
@@ -2092,8 +1995,46 @@ fun FullScreenPlayer(
         }
 
         LaunchedEffect(audioPath) {
-            lrcLines = LrcParser.parse(audioPath)
-            showLyrics = false; isFullscreenLyrics = false; abLoopStart = -1L; abLoopEnd = -1L
+            // ── 1. 瞬间清空 UI 状态，绝不拖泥带水 ──
+            showLyrics = false
+            isFullscreenLyrics = false
+            abLoopStart = -1L
+            abLoopEnd = -1L
+            lrcLines = emptyList()
+            lyricsSource = LyricsSource.LOCAL
+
+            // ── 赛道 A：歌词专属处理协程 ──
+            launch(Dispatchers.IO) {
+                // 1. 毫无延迟地优先读取本地 LRC！
+                val localLines = LrcParser.parse(audioPath)
+                if (localLines.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        lrcLines = localLines
+                        lyricsSource = LyricsSource.LOCAL
+                    }
+                } else if (enableOnlineLyrics) {
+                    // 2. 本地没有，准备联网。🚨 启动 500ms 防抖！
+                    // 如果快速切歌，这个 launch 就会被取消，绝对不会发错请求
+                    delay(500)
+
+                    // 3. 🚨 核心修复：坚决不用外面传进来的可能过期的 title/artist！
+                    // 直接去数据库里通过路径查出这首歌真正的名字！
+                    val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                    val safeTitle = dbSong?.title ?: title
+                    val safeArtist = dbSong?.artist ?: artist
+
+                    val result = OnlineLyricsRepository.getLyrics(
+                        audioPath = audioPath,
+                        title = safeTitle,
+                        artist = safeArtist,
+                        context = context
+                    )
+                    withContext(Dispatchers.Main) {
+                        lrcLines = result.lines
+                        lyricsSource = result.source
+                    }
+                }
+            }
 
             withContext(Dispatchers.IO) {
                 try {
@@ -2897,30 +2838,36 @@ fun FullScreenPlayer(
                                     LaunchedEffect(path) {
                                         highResBitmap = withContext(Dispatchers.IO) {
                                             try {
-                                                val r = MediaMetadataRetriever()
+                                                val r = android.media.MediaMetadataRetriever()
                                                 r.setDataSource(path)
                                                 val pic = r.embeddedPicture
                                                 r.release()
 
                                                 if (pic != null) {
-                                                    // 强制 100% 无损画质
+                                                    // 1. 强制 100% 无损画质读取本地内嵌
                                                     val options = BitmapFactory.Options().apply {
                                                         inPreferredConfig = Bitmap.Config.ARGB_8888
                                                     }
-                                                    BitmapFactory.decodeByteArray(
-                                                        pic,
-                                                        0,
-                                                        pic.size,
-                                                        options
-                                                    ).asImageBitmap()
+                                                    BitmapFactory.decodeByteArray(pic, 0, pic.size, options).asImageBitmap()
                                                 } else {
-                                                    val imgFile = File(
-                                                        context.cacheDir,
-                                                        "audio_meta_cache/${path.hashCode()}.webp"
-                                                    )
-                                                    if (imgFile.exists()) BitmapFactory.decodeFile(
-                                                        imgFile.absolutePath
-                                                    )?.asImageBitmap() else null
+                                                    val imgFile = File(context.cacheDir, "audio_meta_cache/${path.hashCode()}.webp")
+                                                    if (imgFile.exists()) {
+                                                        // 2. 读本地磁盘缓存
+                                                        BitmapFactory.decodeFile(imgFile.absolutePath)?.asImageBitmap()
+                                                    } else {
+                                                        // 🚨 3. 新增：全屏播放器呼叫神级爬虫！
+                                                        // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
+                                                        val bitmap = CoverFetcher.fetchHighResCover(title, artist)
+                                                        if (bitmap != null) {
+                                                            // 顺手存进本地，下次这首歌直接秒开！
+                                                            imgFile.outputStream().use {
+                                                                bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
+                                                            }
+                                                            bitmap.asImageBitmap()
+                                                        } else {
+                                                            null // 彻底找不到，交给极光流体兜底
+                                                        }
+                                                    }
                                                 }
                                             } catch (e: Exception) {
                                                 null
@@ -3333,30 +3280,36 @@ fun FullScreenPlayer(
                                 LaunchedEffect(path) {
                                     highResBitmap = withContext(Dispatchers.IO) {
                                         try {
-                                            val r = MediaMetadataRetriever()
+                                            val r = android.media.MediaMetadataRetriever()
                                             r.setDataSource(path)
                                             val pic = r.embeddedPicture
                                             r.release()
 
                                             if (pic != null) {
-                                                // 强制 100% 无损画质
+                                                // 1. 强制 100% 无损画质读取本地内嵌
                                                 val options = BitmapFactory.Options().apply {
                                                     inPreferredConfig = Bitmap.Config.ARGB_8888
                                                 }
-                                                BitmapFactory.decodeByteArray(
-                                                    pic,
-                                                    0,
-                                                    pic.size,
-                                                    options
-                                                ).asImageBitmap()
+                                                BitmapFactory.decodeByteArray(pic, 0, pic.size, options).asImageBitmap()
                                             } else {
-                                                val imgFile = File(
-                                                    context.cacheDir,
-                                                    "audio_meta_cache/${path.hashCode()}.webp"
-                                                )
-                                                if (imgFile.exists()) BitmapFactory.decodeFile(
-                                                    imgFile.absolutePath
-                                                )?.asImageBitmap() else null
+                                                val imgFile = File(context.cacheDir, "audio_meta_cache/${path.hashCode()}.webp")
+                                                if (imgFile.exists()) {
+                                                    // 2. 读本地磁盘缓存
+                                                    BitmapFactory.decodeFile(imgFile.absolutePath)?.asImageBitmap()
+                                                } else {
+                                                    // 🚨 3. 新增：全屏播放器呼叫神级爬虫！
+                                                    // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
+                                                    val bitmap = CoverFetcher.fetchHighResCover(title, artist)
+                                                    if (bitmap != null) {
+                                                        // 顺手存进本地，下次这首歌直接秒开！
+                                                        imgFile.outputStream().use {
+                                                            bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
+                                                        }
+                                                        bitmap.asImageBitmap()
+                                                    } else {
+                                                        null // 彻底找不到，交给极光流体兜底
+                                                    }
+                                                }
                                             }
                                         } catch (e: Exception) {
                                             null
