@@ -10,6 +10,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
+import com.example.mymusic.AuralisPreset
+import com.example.mymusic.ThemeManager
 
 // ── 设置项数据模型 ────────────────────────────────────────────────────────────
 private data class SettingToggleItem(
@@ -109,6 +112,22 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
+            SettingsSection(
+                title = "外观",
+                icon = Icons.Outlined.Palette,
+                iconTint = MaterialTheme.colorScheme.primary
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        "主题配色",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    ThemePickerGrid(context = context)
+                }
+            }
 
             // ── 一、音频质量 ──────────────────────────────────────────────────
             SettingsSection(
@@ -470,4 +489,123 @@ private fun SettingsDivider() {
         modifier = Modifier.padding(start = 52.dp),
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
     )
+}
+
+@Composable
+fun ThemePickerGrid(context: android.content.Context) {
+    val currentPreset by ThemeManager.preset.collectAsState()
+    val artworkPrimary by ThemeManager.artworkPrimary.collectAsState()
+
+    // 预设信息：(枚举, 代表色, 描述)
+    val presets = listOf(
+        Triple(AuralisPreset.DYNAMIC, artworkPrimary, "跟随专辑封面"),
+        Triple(AuralisPreset.OBSIDIAN, androidx.compose.ui.graphics.Color(0xFFE2E2E2), "近 AMOLED 纯黑"),
+        Triple(AuralisPreset.MIDNIGHT, androidx.compose.ui.graphics.Color(0xFF7EB8F7), "深邃海军蓝"),
+        Triple(AuralisPreset.AMBER, androidx.compose.ui.graphics.Color(0xFFFFB74D), "暖金深棕"),
+        Triple(AuralisPreset.ROSE, androidx.compose.ui.graphics.Color(0xFFF48FB1), "深玫红调"),
+        Triple(AuralisPreset.JADE, androidx.compose.ui.graphics.Color(0xFF80CBC4), "深青绿调"),
+    )
+
+    // 两列网格
+    val rows = presets.chunked(2)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                row.forEach { (preset, color, subtitle) ->
+                    ThemePresetCard(
+                        preset = preset,
+                        accentColor = color,
+                        subtitle = subtitle,
+                        isSelected = currentPreset == preset,
+                        onSelect = { ThemeManager.setPreset(preset, context) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                // 奇数项补空
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemePresetCard(
+    preset: AuralisPreset,
+    accentColor: androidx.compose.ui.graphics.Color,
+    subtitle: String,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+        animationSpec = tween(250), label = "border"
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (isSelected) accentColor.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent,
+        animationSpec = tween(250), label = "bg"
+    )
+
+    Surface(
+        onClick = onSelect,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = bgColor,
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 0.5.dp,
+            color = borderColor
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // 色块预览行
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 主色大圆点
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
+                )
+                // 深色背景小矩形
+                val bgPreview = ThemeManager.buildScheme(preset, accentColor).background
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(bgPreview)
+                )
+                // 选中勾
+                if (isSelected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = accentColor
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = preset.label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
 }

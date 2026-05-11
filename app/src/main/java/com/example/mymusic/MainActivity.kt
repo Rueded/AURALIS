@@ -112,6 +112,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 // 如果 drawRect 还是红的，补上这个：
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
+import com.example.mymusic.ui.theme.AuralisTheme
 
 // ==========================================
 // LRU 音频元数据缓存 (解决快速滑动卡顿)
@@ -398,7 +399,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            ThemeManager.loadSavedPreset(this)
+            AuralisTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
                 }
@@ -827,7 +829,14 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     currentTitle = mediaMetadata.title?.toString()
                     currentArtist = mediaMetadata.artist?.toString()
                     currentArtwork = mediaMetadata.artworkData
+                    scope.launch {
+                        currentArtwork?.let { bytes ->
+                            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            if (bmp != null) ThemeManager.updateFromArtwork(bmp)
+                        }
+                    }
                 }
+
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentAudioPath = mediaItem?.mediaId ?: ""
@@ -960,28 +969,15 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = searchQuery, onValueChange = { searchQuery = it },
-                    placeholder = { Text("搜索歌名/歌手/格式") },
-                    leadingIcon = { Icon(Icons.Filled.Search, "Search") },
-                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(24.dp), singleLine = true
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Box {
-                    IconButton(onClick = { expandedSortMenu = true }) { Icon(Icons.Filled.Sort, "Sort", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    DropdownMenu(expanded = expandedSortMenu, onDismissRequest = { expandedSortMenu = false }) {
-                        listOf("Name" to "按名称", "Date" to "按日期", "Size" to "按大小").forEach { (type, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label + if (sortType == type) (if (isAscending) " ↑" else " ↓") else "", fontWeight = if (sortType == type) FontWeight.Bold else FontWeight.Normal) },
-                                onClick = { if (sortType == type) isAscending = !isAscending else { sortType = type; isAscending = true }; expandedSortMenu = false }
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = { showSettingsScreen = true }) { Icon(Icons.Filled.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                FilledTonalIconButton(onClick = { if (pcServerIp.endsWith(".") || savedFolderUriStr == null) showSettingsScreen = true else fetchSongsList() }, modifier = Modifier.size(52.dp)) { Icon(Icons.Filled.Sync, "Sync") }
-            }
+            HomeHeader(
+                totalSongs = allSongs.size,
+                searchQuery = searchQuery,
+                onSearchChange = { searchQuery = it },
+                onSortClick = { expandedSortMenu = true },
+                onSettingsClick = { showSettingsScreen = true },
+                onSyncClick = { if (pcServerIp.endsWith(".") || savedFolderUriStr == null) showSettingsScreen = true else fetchSongsList() },
+                currentTitle = currentTitle
+            )
 
             ScrollableTabRow(
                 selectedTabIndex = pagerState.currentPage,
@@ -1631,162 +1627,6 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }) { Text("确定") }
             },
             dismissButton = { TextButton(onClick = { showNewPlaylistDialog = false; newPlaylistName = "" }) { Text("取消") } }
-        )
-    }
-}
-
-// ==========================================
-// SongItemUI (带 LRU 缓存 + 150ms 防抖)
-// ==========================================
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun SongItemUI(
-    song: Song,
-    index: Int,
-    isPlaying: Boolean,
-    allowMarquee: Boolean,
-    onClick: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onRemoveFromPlaylist: (() -> Unit)? = null,
-    onDelete: () -> Unit
-) {
-    val cachedInfo = AudioCache.getFromMemory(song.data)
-    var spec by remember(song.data) { mutableStateOf(cachedInfo?.spec) }
-    var bitmap by remember(song.data) { mutableStateOf(cachedInfo?.bitmap) }
-
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-
-    // 👇 新增：分拆两个菜单的状态，并记录长按的精确坐标
-    var showButtonMenu by remember { mutableStateOf(false) }
-    var showTouchMenu by remember { mutableStateOf(false) }
-    var touchOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-
-    // 统一关闭菜单的快捷方法
-    val closeAllMenus = {
-        showButtonMenu = false
-        showTouchMenu = false
-    }
-
-    val lrcPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val inputStream = context.contentResolver.openInputStream(uri)
-                    val lrcFile = File(File(song.data).parent, "${File(song.data).nameWithoutExtension}.lrc")
-                    val outputStream = FileOutputStream(lrcFile)
-                    inputStream?.copyTo(outputStream); inputStream?.close(); outputStream.close()
-                    withContext(Dispatchers.Main) { Toast.makeText(context, "歌词导入成功！", Toast.LENGTH_SHORT).show() }
-                } catch (e: Exception) { withContext(Dispatchers.Main) { Toast.makeText(context, "导入失败", Toast.LENGTH_SHORT).show() } }
-            }
-        }
-    }
-
-    LaunchedEffect(song.data) {
-        if (spec != null) return@LaunchedEffect
-        val diskInfo = AudioCache.loadFromDisk(context, song)
-        if (diskInfo != null) {
-            spec = diskInfo.spec; bitmap = diskInfo.bitmap
-            return@LaunchedEffect
-        }
-        delay(250)
-        val freshInfo = AudioCache.extractAndSave(context, song)
-        spec = freshInfo.spec; bitmap = freshInfo.bitmap
-    }
-
-    val marqueeModifier = if (isPlaying && allowMarquee) Modifier.basicMarquee() else Modifier
-
-    // 👇 提取出菜单项的 UI，避免写两遍重复代码
-    val menuItems = @Composable {
-        DropdownMenuItem(text = { Text("下一首播放") }, leadingIcon = { Icon(Icons.Filled.PlaylistPlay, null) }, onClick = { closeAllMenus(); onPlayNext() })
-        DropdownMenuItem(text = { Text("添加到歌单...") }, leadingIcon = { Icon(Icons.Filled.PlaylistAdd, null) }, onClick = { closeAllMenus(); onAddToPlaylist() })
-        if (onRemoveFromPlaylist != null) {
-            DropdownMenuItem(text = { Text("从歌单移除") }, leadingIcon = { Icon(Icons.Filled.RemoveCircleOutline, null) }, onClick = { closeAllMenus(); onRemoveFromPlaylist() })
-        }
-        DropdownMenuItem(text = { Text("导入 LRC 歌词") }, leadingIcon = { Icon(Icons.Filled.Subtitles, null) }, onClick = { closeAllMenus(); lrcPickerLauncher.launch("*/*") })
-        DropdownMenuItem(text = { Text("彻底删除文件", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { closeAllMenus(); showDeleteConfirm = true })
-    }
-
-    // 最外层的 Box，包裹整行
-    Box(modifier = Modifier.fillMaxWidth()) {
-
-        // 🔮 黑科技：指尖锚点！一个大小为 0 的隐形盒子，永远跟着你的长按坐标走
-        Box(
-            modifier = Modifier
-                .offset { androidx.compose.ui.unit.IntOffset(touchOffset.x.toInt(), touchOffset.y.toInt()) }
-                .size(0.dp)
-        ) {
-            DropdownMenu(expanded = showTouchMenu, onDismissRequest = closeAllMenus) {
-                menuItems() // 展开这里的菜单
-            }
-        }
-
-        // 歌曲卡片本体
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .pointerInput(Unit) {
-                    // 👇 修复 1：直接写函数名，千万别带那一长串包名
-                    detectTapGestures(
-                        // 👇 修复 2：用 `_ ->` 告诉编译器“我接收了这个参数但我不用”
-                        onTap = { _ -> onClick() },
-                        // 👇 修复 3：强行指定 offset 的类型，治好编译器的“类型推断失败”
-                        onLongPress = { offset: Offset ->
-                            touchOffset = offset
-                            showTouchMenu = true
-                        }
-                    )
-                }
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "${index + 1}", style = MaterialTheme.typography.bodyMedium, color = if (isPlaying) MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
-
-            if (bitmap != null) {
-                Image(bitmap = bitmap!!, contentDescription = "Cover", contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp).clip(CircleShape))
-            } else {
-                AdvancedFluidCover(
-                    seedString = song.data,
-                    iconSize = 20.dp, // 保持小巧
-                    modifier = Modifier.size(48.dp).clip(CircleShape)
-                )
-            }
-
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = song.title, style = MaterialTheme.typography.titleMedium, color = if (isPlaying) MaterialTheme.colorScheme.primary else Color.Unspecified, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).then(marqueeModifier))
-                    spec?.let {
-                        if (it.level != AudioLevel.STANDARD) { Spacer(Modifier.width(8.dp)); Box(modifier = Modifier.border(1.dp, it.level.color, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp)) { Text(it.level.label, fontSize = 9.sp, color = it.level.color, fontWeight = FontWeight.Bold) } }
-                        if (it.isSpatial) { Spacer(Modifier.width(4.dp)); Box(modifier = Modifier.border(1.dp, it.spatialColor, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp)) { Text(it.spatialLabel, fontSize = 9.sp, color = it.spatialColor, fontWeight = FontWeight.Bold) } }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = song.artist, style = MaterialTheme.typography.bodySmall, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).then(marqueeModifier))
-                    Spacer(Modifier.width(8.dp))
-                    Text("${song.size / 1048576} MB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                }
-            }
-
-            // 右侧三个点按钮和它的专属菜单
-            Box {
-                IconButton(onClick = { showButtonMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu", tint = Color.Gray) }
-                DropdownMenu(expanded = showButtonMenu, onDismissRequest = closeAllMenus) {
-                    menuItems() // 展开这里的菜单
-                }
-            }
-        }
-    }
-
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false }, title = { Text("确认删除") },
-            text = { Text("将彻底从手机存储中删除此文件，不可恢复。") },
-            confirmButton = { Button(onClick = { showDeleteConfirm = false; onDelete() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("删除") } },
-            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") } }
         )
     }
 }
