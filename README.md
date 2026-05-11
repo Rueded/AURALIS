@@ -53,4 +53,4 @@ Auralis 解决了一个长久以来困扰 Android 音视频开发者的痛点：
 
 ## 📜 许可证 (License)
 
-本项目采用 [MIT License](LICENSE) 许可证。
+本项目采用 [GNU GPLv3](LICENSE) 许可证。
