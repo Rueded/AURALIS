@@ -64,8 +64,9 @@ fun SettingsScreen(
 
     val folderPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            val path = uri.lastPathSegment?.replace("primary:", "/storage/emulated/0/") ?: return@rememberLauncherForActivityResult
-            onFolderAdded(path)
+            // ✨ 云糯修复：调用 Android 官方的 DocumentFile 提取纯净的文件夹名称！
+            val folderName = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)?.name ?: return@rememberLauncherForActivityResult
+            onFolderAdded(folderName)
         }
     }
 
