@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,28 +31,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+// ── 设置项数据模型 ────────────────────────────────────────────────────────────
+private data class SettingToggleItem(
+    val icon: ImageVector,
+    val iconTint: Color,
+    val title: String,
+    val subtitle: String,
+    val checked: Boolean,
+    val enabled: Boolean = true,
+    val onToggle: (Boolean) -> Unit
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    enableReplayGain: Boolean,
-    onReplayGainChange: (Boolean) -> Unit,
-    enableBitPerfect: Boolean,
-    onBitPerfectChange: (Boolean) -> Unit,
-    isPcMode: Boolean,
-    onPcModeChange: (Boolean) -> Unit,
-    pcServerIp: String,
-    onPcServerIpChange: (String) -> Unit,
-    savedFolderUriStr: String?,       // 💡 修复：接收文件夹路径
-    onPickFolder: () -> Unit,         // 💡 修复：接收选择文件夹的回调
-    allowedFolders: Set<String>,
-    onFolderAdded: (String) -> Unit,
-    onFolderRemoved: (String) -> Unit,
-    onRescanLibrary: () -> Unit,
-    onBatchImportLrc: () -> Unit,
-    onShowSleepTimer: () -> Unit
+    enableReplayGain: Boolean, onReplayGainChange: (Boolean) -> Unit,
+    enableBitPerfect: Boolean, onBitPerfectChange: (Boolean) -> Unit,
+    isPcMode: Boolean, onPcModeChange: (Boolean) -> Unit,
+    pcServerIp: String, onPcServerIpChange: (String) -> Unit,
+    savedFolderUriStr: String?, onPickFolder: () -> Unit,
+    allowedFolders: Set<String>, onFolderAdded: (String) -> Unit, onFolderRemoved: (String) -> Unit,
+    onRescanLibrary: () -> Unit, onBatchImportLrc: () -> Unit, onShowSleepTimer: () -> Unit
 ) {
     val context = LocalContext.current
+    val scrollState = rememberScrollState()
     val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
 
     var enableOnlineLyrics by remember { mutableStateOf(prefs.getBoolean("enable_online_lyrics", true)) }
@@ -75,46 +79,63 @@ fun SettingsScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(scrollState).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // ── 〇 外观 ──────────────────────────────────────────────────────
+
+            // ── 〇 外观 (哥哥最爱的 v1.5 风格网格) ─────────────────────────────
             SettingsSection("外观", Icons.Outlined.Palette, MaterialTheme.colorScheme.primary) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("主题配色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)) {
+                    Text("主题配色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(12.dp))
+
                     ThemePickerGrid(context)
 
-                    Spacer(Modifier.height(20.dp))
-                    Text("自定义色相", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(24.dp))
+                    Text("自定义色相", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(8.dp))
 
                     val currentPreset by ThemeManager.preset.collectAsState()
                     val customHue by ThemeManager.customHue.collectAsState()
                     val artworkPrimary by ThemeManager.artworkPrimary.collectAsState()
+                    val targetHue = if (currentPreset == AuralisPreset.CUSTOM) customHue else ThemeManager.getHue(ThemeManager.previewColor(currentPreset, artworkPrimary, customHue))
 
-                    // 💡 修复：让滑块跟随当前主题的色相动态改变
-                    val effectiveHue = if (currentPreset == AuralisPreset.CUSTOM) customHue
-                    else ThemeManager.getHue(ThemeManager.previewColor(currentPreset, artworkPrimary, customHue))
+                    // ✨ 修复滑块动画：加回了长达 800 毫秒的柔和滑动过渡！
+                    var isDraggingSlider by remember { mutableStateOf(false) }
+                    var sliderValue by remember { mutableFloatStateOf(targetHue) }
 
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp))
-                            .background(androidx.compose.ui.graphics.Brush.horizontalGradient((0..12).map { i -> Color(android.graphics.Color.HSVToColor(floatArrayOf(i * 30f, 0.7f, 0.85f))) }))
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Slider(
-                        value = effectiveHue,
-                        onValueChange = { ThemeManager.setCustomHue(it, context) },
-                        valueRange = 0f..360f,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    LaunchedEffect(targetHue) {
+                        if (!isDraggingSlider) {
+                            androidx.compose.animation.core.animate(
+                                initialValue = sliderValue,
+                                targetValue = targetHue,
+                                animationSpec = tween(durationMillis = 800) // ✨ 哥哥要求的长滑动效果
+                            ) { value, _ ->
+                                sliderValue = value
+                            }
+                        }
+                    }
 
-                    Spacer(Modifier.height(8.dp))
-                    Text("深浅色模式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Box(modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(androidx.compose.ui.graphics.Brush.horizontalGradient((0..12).map { i -> Color(android.graphics.Color.HSVToColor(floatArrayOf(i * 30f, 0.7f, 0.85f))) })))
+                        Slider(
+                            value = sliderValue,
+                            onValueChange = {
+                                isDraggingSlider = true
+                                sliderValue = it
+                                ThemeManager.setCustomHue(it, context)
+                            },
+                            onValueChangeFinished = { isDraggingSlider = false },
+                            valueRange = 0f..360f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Text("深浅色模式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(10.dp))
-
                     val forceDark by ThemeManager.forceDark.collectAsState()
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(null to "跟随系统", true to "深色", false to "浅色").forEach { (value, label) ->
                             val selected = forceDark == value
                             FilterChip(selected = selected, onClick = { ThemeManager.setForceDark(value, context) }, label = { Text(label, fontSize = 12.sp) }, leadingIcon = if (selected) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(14.dp)) } } else null)
@@ -124,7 +145,7 @@ fun SettingsScreen(
 
                 SettingsDivider()
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text("播放器背景", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("全屏播放器背景", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         BackgroundMode.entries.forEach { mode ->
@@ -134,55 +155,82 @@ fun SettingsScreen(
                 }
             }
 
-            // ── 一 音频质量 ──────────────────────────────────────────────────
-            SettingsSection("音频质量", Icons.Outlined.Headphones, MaterialTheme.colorScheme.primary) {
-                SettingToggleRow(icon = Icons.Outlined.Equalizer, iconTint = MaterialTheme.colorScheme.tertiary, title = "音量标准化", subtitle = "ReplayGain · 自动平衡不同歌曲响度", checked = enableReplayGain, onToggle = onReplayGainChange)
+            // ── 一 音频质量 (统一为粉色系) ──────────────────────────────────────
+            SettingsSection("音频质量", Icons.Outlined.Headphones, MaterialTheme.colorScheme.tertiary) {
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.Equalizer,
+                        iconTint = MaterialTheme.colorScheme.tertiary,
+                        title = "音量标准化",
+                        subtitle = "ReplayGain · 自动平衡不同歌曲响度",
+                        checked = enableReplayGain,
+                        onToggle = onReplayGainChange
+                    )
+                )
                 SettingsDivider()
-                SettingToggleRow(icon = Icons.Outlined.SettingsInputHdmi, iconTint = if (enableBitPerfect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, title = "USB 源码直通", subtitle = if (Build.VERSION.SDK_INT < 34) "Bit-perfect · 需要 Android 14+ 及外接 DAC" else if (enableBitPerfect) "Bit-perfect · 已绕过系统混音器 ✓" else "Bit-perfect · 绕过 AudioFlinger，连接 USB DAC 生效", checked = enableBitPerfect, enabled = Build.VERSION.SDK_INT >= 34, onToggle = { onBitPerfectChange(it) })
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.SettingsInputHdmi,
+                        iconTint = MaterialTheme.colorScheme.tertiary,
+                        title = "USB 源码直通",
+                        subtitle = if (Build.VERSION.SDK_INT < 34) "Bit-perfect · 需要 Android 14+" else if (enableBitPerfect) "Bit-perfect · 已绕过系统混音器 ✓" else "连接 USB DAC 生效",
+                        checked = enableBitPerfect,
+                        enabled = Build.VERSION.SDK_INT >= 34,
+                        onToggle = { onBitPerfectChange(it) }
+                    )
+                )
             }
 
-            // ── 二 歌词 ──────────────────────────────────────────────────────
+            // ── 二 歌词 ────────────────────────────────────────
             SettingsSection("歌词", Icons.Outlined.Lyrics, MaterialTheme.colorScheme.secondary) {
-                SettingToggleRow(icon = Icons.Outlined.CloudDownload, iconTint = MaterialTheme.colorScheme.secondary, title = "在线歌词搜索", subtitle = "无本地 LRC 时自动联网获取", checked = enableOnlineLyrics, onToggle = { enableOnlineLyrics = it; prefs.edit().putBoolean("enable_online_lyrics", it).apply() })
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.CloudDownload,
+                        iconTint = MaterialTheme.colorScheme.secondary,
+                        title = "在线歌词搜索",
+                        subtitle = "无本地 LRC 时自动联网获取",
+                        checked = enableOnlineLyrics,
+                        onToggle = { enableOnlineLyrics = it; prefs.edit().putBoolean("enable_online_lyrics", it).apply() }
+                    )
+                )
+                AnimatedVisibility(visible = enableOnlineLyrics, enter = expandVertically(tween(200)), exit = shrinkVertically(tween(200))) {
+                    Column {
+                        SettingsDivider()
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text("优先来源", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // ✨ 恢复“自动”，并改为网易云和酷狗！
+                                listOf("auto" to "自动", "163" to "网易云", "kugou" to "酷狗").forEach { (key, label) ->
+                                    FilterChip(selected = onlineLyricsSource == key, onClick = { onlineLyricsSource = key; prefs.edit().putString("online_lyrics_source", key).apply() }, label = { Text(label, fontSize = 12.sp) })
+                                }
+                            }
+                        }
+                    }
+                }
                 SettingsDivider()
                 SettingsClickRow(icon = Icons.Outlined.FileOpen, iconTint = MaterialTheme.colorScheme.secondary, title = "批量导入 LRC", subtitle = "从文件管理器批量选择歌词文件", onClick = onBatchImportLrc)
             }
 
             // ── 三 音乐库 ────────────────────────────────────────────────────
-            SettingsSection("音乐库", Icons.Outlined.LibraryMusic, Color(0xFF7C4DFF)) {
-                if (allowedFolders.isEmpty()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("扫描全盘音乐", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    allowedFolders.forEachIndexed { i, folder ->
-                        if (i > 0) SettingsDivider()
-                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Folder, null, tint = Color(0xFF7C4DFF), modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text(folder, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2)
-                            IconButton(onClick = { onFolderRemoved(folder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, "移除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) }
-                        }
-                    }
-                }
+            val libraryColor = Color(0xFF7C4DFF)
+            SettingsSection("音乐库", Icons.Outlined.LibraryMusic, libraryColor) {
+                if (allowedFolders.isEmpty()) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text("扫描全盘音乐", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                else { allowedFolders.forEachIndexed { i, folder -> if (i > 0) SettingsDivider(); Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Folder, null, tint = libraryColor, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(folder, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2); IconButton(onClick = { onFolderRemoved(folder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, "移除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) } } } }
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.CreateNewFolder, iconTint = Color(0xFF7C4DFF), title = "添加扫描路径", subtitle = "指定文件夹，不再扫描全盘", onClick = { folderPickerLauncher.launch(null) })
+                SettingsClickRow(icon = Icons.Outlined.CreateNewFolder, iconTint = libraryColor, title = "添加扫描路径", subtitle = "指定文件夹，不再扫描全盘", onClick = { folderPickerLauncher.launch(null) })
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.Refresh, iconTint = Color(0xFF7C4DFF), title = "重新深度扫描", subtitle = "清空缓存，重新解析所有音乐文件元数据", onClick = onRescanLibrary)
+                SettingsClickRow(icon = Icons.Outlined.Refresh, iconTint = libraryColor, title = "重新深度扫描", subtitle = "清空缓存，重新解析所有歌曲", onClick = onRescanLibrary)
             }
 
-            // ── 四 连接与同步 ──────────────────────────────────────────────────────
-            SettingsSection("连接与同步", Icons.Outlined.Wifi, Color(0xFF00897B)) {
-                SettingToggleRow(icon = Icons.Outlined.Speaker, iconTint = if (isPcMode) Color(0xFF00897B) else MaterialTheme.colorScheme.outline, title = "PC 有线音箱模式", subtitle = if (isPcMode) "正在监听端口…" else "将手机变为 PC 的零延迟音箱", checked = isPcMode, onToggle = onPcModeChange)
+            // ── 四 连接与同步 ──────────────────────────────────────────────────
+            val syncColor = Color(0xFF00897B)
+            SettingsSection("连接与同步", Icons.Outlined.Wifi, syncColor) {
+                SettingToggleRow(item = SettingToggleItem(icon = Icons.Outlined.Speaker, iconTint = syncColor, title = "PC 有线音箱模式", subtitle = if (isPcMode) "正在监听端口…" else "将手机变为 PC 的零延迟音箱", checked = isPcMode, onToggle = onPcModeChange))
                 SettingsDivider()
-                // 💡 修复：补回同步文件夹的选择
-                SettingsClickRow(icon = Icons.Outlined.FolderSpecial, iconTint = Color(0xFF00897B), title = "同步保存路径", subtitle = if (savedFolderUriStr != null) "已配置" else "尚未设置下载位置", onClick = onPickFolder)
+                SettingsClickRow(icon = Icons.Outlined.FolderSpecial, iconTint = syncColor, title = "同步保存路径", subtitle = if (savedFolderUriStr != null) "已配置" else "尚未设置下载位置", onClick = onPickFolder)
                 SettingsDivider()
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text("电脑局域网 IP") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-                }
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text("电脑局域网 IP") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) }
             }
 
             SettingsSection("其他", Icons.Outlined.MoreHoriz, MaterialTheme.colorScheme.outline) {
@@ -193,48 +241,70 @@ fun SettingsScreen(
     }
 }
 
+// ── 子组件 ────────────────────────────────────────────────────────────────────
+
 @Composable
 fun ThemePickerGrid(context: Context) {
-    val currentPreset  by ThemeManager.preset.collectAsState()
+    val currentPreset by ThemeManager.preset.collectAsState()
     val artworkPrimary by ThemeManager.artworkPrimary.collectAsState()
-    val customHue      by ThemeManager.customHue.collectAsState()
+    val customHue by ThemeManager.customHue.collectAsState()
+    val forceDark by ThemeManager.forceDark.collectAsState()
+    val isDark = forceDark ?: isSystemInDarkTheme()
 
-    val presets = AuralisPreset.entries.filter { it != AuralisPreset.CUSTOM }
-    val rows = presets.chunked(3)
+    val presets = listOf(
+        Triple(AuralisPreset.DYNAMIC, artworkPrimary, "跟随专辑封面"),
+        Triple(AuralisPreset.OBSIDIAN, Color(0xFFE2E2E2), "近 AMOLED 纯黑"),
+        Triple(AuralisPreset.MIDNIGHT, Color(0xFF7EB8F7), "深邃海军蓝"),
+        Triple(AuralisPreset.AMBER, Color(0xFFFFB74D), "暖金深棕"),
+        Triple(AuralisPreset.ROSE, Color(0xFFF48FB1), "深玫红调"),
+        Triple(AuralisPreset.AURORA, Color(0xFF69F0AE), "极光绿意"),
+        Triple(AuralisPreset.VIOLET, Color(0xFFCE93D8), "梦幻烟紫"),
+        Triple(AuralisPreset.SOLAR, Color(0xFFFFF176), "正午金辉")
+    )
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val rows = presets.chunked(2)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
         rows.forEach { row ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { preset ->
-                    val color = ThemeManager.previewColor(preset, artworkPrimary, customHue)
-                    ThemePresetCard(preset = preset, accentColor = color, isSelected = currentPreset == preset, onSelect = { ThemeManager.setPreset(preset, context) }, modifier = Modifier.weight(1f))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { (preset, color, subtitle) ->
+                    ThemePresetCard(
+                        preset = preset, accentColor = color, subtitle = subtitle, artworkPrimary = artworkPrimary, customHue = customHue, isDark = isDark,
+                        isSelected = currentPreset == preset, onSelect = { ThemeManager.setPreset(preset, context) }, modifier = Modifier.weight(1f)
+                    )
                 }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun ThemePresetCard(preset: AuralisPreset, accentColor: Color, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier) {
-    val borderColor by animateColorAsState(targetValue = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), animationSpec = tween(250), label = "border")
-    val bgAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isSelected) 0.10f else 0f, animationSpec = tween(250), label = "bgAlpha")
+private fun ThemePresetCard(
+    preset: AuralisPreset, accentColor: Color, subtitle: String, artworkPrimary: Color, customHue: Float, isDark: Boolean, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier
+) {
+    val borderColor by animateColorAsState(targetValue = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), label = "border")
+    val bgColor by animateColorAsState(targetValue = if (isSelected) accentColor.copy(alpha = 0.08f) else Color.Transparent, label = "bg")
 
-    Surface(onClick = onSelect, modifier = modifier, shape = RoundedCornerShape(12.dp), color = accentColor.copy(alpha = bgAlpha), border = BorderStroke(width = if (isSelected) 1.5.dp else 0.5.dp, color = borderColor)) {
-        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(accentColor))
-            Spacer(Modifier.height(6.dp))
-            Text(preset.label, style = MaterialTheme.typography.bodySmall, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal, color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface, maxLines = 1)
+    Surface(onClick = onSelect, modifier = modifier, shape = RoundedCornerShape(14.dp), color = bgColor, border = BorderStroke(width = if (isSelected) 1.5.dp else 0.5.dp, color = borderColor)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(accentColor))
+                val bgPreview = ThemeManager.buildScheme(preset, artworkPrimary, customHue, isDark).background
+                Box(modifier = Modifier.weight(1f).height(22.dp).clip(RoundedCornerShape(4.dp)).background(bgPreview))
+                if (isSelected) { Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp), tint = accentColor) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(preset.label, style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal, color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
         }
     }
 }
 
-// ── 通用子组件保留 ─────────────────────────────────────────────────────────────────
 @Composable
 private fun SettingsSection(title: String, icon: ImageVector, iconTint: Color, content: @Composable ColumnScope.() -> Unit) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)) {
-            Box(modifier = Modifier.size(26.dp).clip(CircleShape).background(iconTint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = iconTint, modifier = Modifier.size(15.dp)) }
+            Box(modifier = Modifier.size(28.dp).clip(CircleShape).background(iconTint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = iconTint, modifier = Modifier.size(16.dp)) }
             Spacer(Modifier.width(8.dp))
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -243,16 +313,22 @@ private fun SettingsSection(title: String, icon: ImageVector, iconTint: Color, c
 }
 
 @Composable
-private fun SettingToggleRow(icon: ImageVector, iconTint: Color, title: String, subtitle: String, checked: Boolean, enabled: Boolean = true, onToggle: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { onToggle(!checked) }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = if (enabled) iconTint else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(22.dp))
+private fun SettingToggleRow(item: SettingToggleItem) {
+    val targetTint = if (item.enabled && item.checked) item.iconTint else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+    val iconTint by animateColorAsState(targetTint, label = "iconTint")
+
+    Row(modifier = Modifier.fillMaxWidth().clickable(enabled = item.enabled) { item.onToggle(!item.checked) }.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(item.icon, null, tint = iconTint, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.4f), lineHeight = 16.sp)
+            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (item.enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+            Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (item.enabled) 1f else 0.4f), lineHeight = 16.sp)
         }
         Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = { onToggle(it) }, enabled = enabled)
+        Switch(
+            checked = item.checked, onCheckedChange = { item.onToggle(it) }, enabled = item.enabled,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = item.iconTint, checkedBorderColor = item.iconTint)
+        )
     }
 }
 

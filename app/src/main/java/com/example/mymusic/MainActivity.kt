@@ -128,6 +128,12 @@ object AudioCache {
     private val memoryCache = LruCache<String, CachedAudioInfo>(1000)
     private val loadingMutexes = ConcurrentHashMap<String, Mutex>()
 
+    fun updateMemoryCacheBitmap(path: String, bmp: ImageBitmap) {
+        memoryCache.get(path)?.let {
+            memoryCache.put(path, it.copy(bitmap = bmp))
+        }
+    }
+
     fun getFromMemory(path: String): CachedAudioInfo? = memoryCache.get(path)
 
     suspend fun loadFromDisk(context: Context, song: Song): CachedAudioInfo? {
@@ -424,19 +430,38 @@ class MainActivity : ComponentActivity() {
 // ==========================================
 @Composable
 fun EqDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
+    val isBitPerfect = prefs.getBoolean("enable_bit_perfect", false)
+
+    if (isBitPerfect) {
+        AlertDialog(
+            onDismissRequest = onDismiss, title = { Text("均衡器已旁路") },
+            text = { Text("当前已开启 USB 源码直通，音频信号直接发送至 DAC，系统 EQ 无法介入。") },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("了解") } }
+        )
+        return
+    }
+
+    var eqErrorMessage by remember { mutableStateOf<String?>(null) }
     val eq = remember {
         try {
-            if (PlaybackService.audioSessionId != 0)
+            if (PlaybackService.audioSessionId != 0) {
                 Equalizer(0, PlaybackService.audioSessionId).also { it.enabled = true }
-            else null
-        } catch (e: Exception) { null }
+            } else {
+                eqErrorMessage = "AudioSessionId 尚未准备好，请先播放任意一首歌曲后再打开 EQ。"
+                null
+            }
+        } catch (e: Exception) {
+            eqErrorMessage = "当前手机系统拒绝了全局均衡器请求：${e.message}"
+            null
+        }
     }
 
     if (eq == null) {
         AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("均衡器") },
-            text = { Text("当前设备不支持均衡器，或尚未开始播放任何歌曲") },
+            onDismissRequest = onDismiss, title = { Text("均衡器不可用") },
+            text = { Text(eqErrorMessage ?: "未知错误") },
             confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
         )
         return
@@ -452,7 +477,7 @@ fun EqDialog(onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("均衡器", fontWeight = FontWeight.Bold) },
+        title = { Text("发烧级均衡器", fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (presetNames.isNotEmpty()) {
@@ -491,10 +516,7 @@ fun EqDialog(onDismiss: () -> Unit) {
                         )
                         Text(
                             "${bandLevels[bandIdx] / 100}dB",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.width(40.dp),
-                            textAlign = TextAlign.End,
-                            fontSize = 10.sp,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(40.dp), textAlign = TextAlign.End, fontSize = 10.sp,
                             color = when {
                                 bandLevels[bandIdx] > 0 -> MaterialTheme.colorScheme.primary
                                 bandLevels[bandIdx] < 0 -> MaterialTheme.colorScheme.error
@@ -503,15 +525,10 @@ fun EqDialog(onDismiss: () -> Unit) {
                         )
                     }
                 }
-
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { repeat(numBands) { i -> eq.setBandLevel(i.toShort(), 0); bandLevels[i] = 0 } },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("重置全部") }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        dismissButton = { TextButton(onClick = { repeat(numBands) { i -> eq.setBandLevel(i.toShort(), 0); bandLevels[i] = 0 } }) { Text("重置") } }
     )
 }
 
@@ -2728,11 +2745,23 @@ fun FullScreenPlayer(
                                                             imgFile.outputStream().use {
                                                                 bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
                                                             }
-                                                            // 修复：在线封面也触发主题颜色更新
-                                                            scope.launch { ThemeManager.updateFromArtwork(bitmap) }
-                                                            bitmap.asImageBitmap()
+
+                                                            // 👇 核心修复 1：立刻提取颜色并强制更新全屏背景！
+                                                            val palette = androidx.palette.graphics.Palette.from(bitmap).generate()
+                                                            val rgb = palette.vibrantSwatch?.rgb ?: palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb
+                                                            if (rgb != null) {
+                                                                withContext(Dispatchers.Main) { dominantColor = Color(rgb) }
+                                                            }
+
+                                                            val bmpImg = bitmap.asImageBitmap()
+                                                            // 👇 核心修复 2：同步给首页缓存
+                                                            AudioCache.updateMemoryCacheBitmap(path, bmpImg)
+                                                            // 👇 核心修复 3：通知全局 ThemeManager 变色！
+                                                            ThemeManager.updateFromArtwork(bitmap)
+
+                                                            bmpImg
                                                         } else {
-                                                            null // 彻底找不到，交给极光流体兜底
+                                                            null
                                                         }
                                                     }
                                                 }
@@ -3168,13 +3197,26 @@ fun FullScreenPlayer(
                                                     // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
                                                     val bitmap = CoverFetcher.fetchHighResCover(title, artist)
                                                     if (bitmap != null) {
-                                                        // 顺手存进本地，下次这首歌直接秒开！
                                                         imgFile.outputStream().use {
                                                             bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
                                                         }
-                                                        bitmap.asImageBitmap()
+
+                                                        // 👇 核心修复 1：立刻提取颜色并强制更新全屏背景！
+                                                        val palette = androidx.palette.graphics.Palette.from(bitmap).generate()
+                                                        val rgb = palette.vibrantSwatch?.rgb ?: palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb
+                                                        if (rgb != null) {
+                                                            withContext(Dispatchers.Main) { dominantColor = Color(rgb) }
+                                                        }
+
+                                                        val bmpImg = bitmap.asImageBitmap()
+                                                        // 👇 核心修复 2：同步给首页缓存
+                                                        AudioCache.updateMemoryCacheBitmap(path, bmpImg)
+                                                        // 👇 核心修复 3：通知全局 ThemeManager 变色！
+                                                        ThemeManager.updateFromArtwork(bitmap)
+
+                                                        bmpImg
                                                     } else {
-                                                        null // 彻底找不到，交给极光流体兜底
+                                                        null
                                                     }
                                                 }
                                             }
@@ -3544,14 +3586,28 @@ fun generateElegantColors(seedString: String): List<Color> {
 
 @Composable
 fun AnimatedEqIcon(isPlaying: Boolean, modifier: Modifier = Modifier, tint: Color = LocalContentColor.current) {
-    val infiniteTransition = rememberInfiniteTransition(label = "eq")
-    val anim1 by infiniteTransition.animateFloat(initialValue = 0.3f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse), label = "")
-    val anim2 by infiniteTransition.animateFloat(initialValue = 0.6f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse), label = "")
-    val anim3 by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse), label = "")
+    // 独立控制的 3 根弹簧动画
+    val h1 = remember { androidx.compose.animation.core.Animatable(0.3f) }
+    val h2 = remember { androidx.compose.animation.core.Animatable(0.4f) }
+    val h3 = remember { androidx.compose.animation.core.Animatable(0.3f) }
+
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            // 播放时，无限循环跳动
+            launch { while (isActive) { h1.animateTo(1f, tween(400, easing = LinearEasing)); h1.animateTo(0.3f, tween(400, easing = LinearEasing)) } }
+            launch { while (isActive) { h2.animateTo(1f, tween(300, easing = LinearEasing)); h2.animateTo(0.4f, tween(300, easing = LinearEasing)) } }
+            launch { while (isActive) { h3.animateTo(1f, tween(500, easing = LinearEasing)); h3.animateTo(0.3f, tween(500, easing = LinearEasing)) } }
+        } else {
+            // 暂停时，瞬间平滑降到底部并停止！
+            launch { h1.animateTo(0.2f, tween(300)) }
+            launch { h2.animateTo(0.2f, tween(300)) }
+            launch { h3.animateTo(0.2f, tween(300)) }
+        }
+    }
 
     Row(modifier = modifier.height(16.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim1 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim2 else 0.4f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim3 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(h1.value).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(h2.value).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(h3.value).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
     }
 }

@@ -61,6 +61,7 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
 
+
     val roomVersion = "2.6.1" // Room 目前非常稳定，这个版本就足够强悍啦
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")

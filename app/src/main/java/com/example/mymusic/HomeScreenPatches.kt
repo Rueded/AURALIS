@@ -49,7 +49,6 @@ fun HomeHeader(
     totalSongs: Int,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
-    // Sort: 直接在这里内联 DropdownMenu，修复 sort 失效
     sortType: String,
     isAscending: Boolean,
     onSortChange: (type: String, asc: Boolean) -> Unit,
@@ -93,7 +92,7 @@ fun HomeHeader(
                 }
             }
 
-            // Sort 按钮 + 内联菜单（修复：菜单不再丢失）
+            // 💡 修复：极具高级感的内联排序菜单
             Box {
                 IconButton(onClick = { expandedSort = true }) {
                     Icon(
@@ -104,8 +103,29 @@ fun HomeHeader(
                 }
                 DropdownMenu(
                     expanded = expandedSort,
-                    onDismissRequest = { expandedSort = false }
+                    onDismissRequest = { expandedSort = false },
+                    // 稍微加一点圆角，更显精致
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
                 ) {
+                    // 1. 顶部第一行：独立的升降序切换开关
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (isAscending) "A-Z / 升序排列" else "Z-A / 降序排列",
+                                color = primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        leadingIcon = { Icon(Icons.Filled.SwapVert, null, tint = primary) },
+                        onClick = {
+                            onSortChange(sortType, !isAscending)
+                            expandedSort = false
+                        }
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+
+                    // 2. 下面是具体的排序选项
                     listOf(
                         "Name" to "按名称",
                         "Date" to "按日期",
@@ -115,19 +135,18 @@ fun HomeHeader(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    label + if (selected) (if (isAscending) "  ↑" else "  ↓") else "",
+                                    label,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) primary else Color.Unspecified
+                                    color = if (selected) primary else MaterialTheme.colorScheme.onSurface
                                 )
                             },
-                            leadingIcon = if (selected) {
-                                { Icon(
-                                    if (isAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
-                                    null, tint = primary, modifier = Modifier.size(16.dp)
-                                ) }
+                            // 选中时，尾部出现漂亮的打勾图标
+                            trailingIcon = if (selected) {
+                                { Icon(Icons.Filled.Check, null, tint = primary, modifier = Modifier.size(18.dp)) }
                             } else null,
                             onClick = {
-                                val newAsc = if (sortType == type) !isAscending else true
+                                // 如果点击的不是当前项，默认重置为升序；如果是当前项，保持现有升降序
+                                val newAsc = if (sortType == type) isAscending else true
                                 onSortChange(type, newAsc)
                                 expandedSort = false
                             }
