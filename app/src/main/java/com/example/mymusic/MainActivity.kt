@@ -1326,6 +1326,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 },
                 pcServerIp = pcServerIp,
                 onPcServerIpChange = { pcServerIp = it; prefs.edit().putString("server_ip", it).apply() },
+
+                // 💡 修复：补上了这两个参数！
+                savedFolderUriStr = savedFolderUriStr,
+                onPickFolder = { folderPickerLauncher.launch(null) },
+
                 allowedFolders = allowedFolders,
                 onFolderAdded = { folder ->
                     val newSet = allowedFolders.toMutableSet().apply { add(folder) }
@@ -3535,4 +3540,18 @@ fun generateElegantColors(seedString: String): List<Color> {
         randomElegantColor(false),
         randomElegantColor(true)
     )
+}
+
+@Composable
+fun AnimatedEqIcon(isPlaying: Boolean, modifier: Modifier = Modifier, tint: Color = LocalContentColor.current) {
+    val infiniteTransition = rememberInfiniteTransition(label = "eq")
+    val anim1 by infiniteTransition.animateFloat(initialValue = 0.3f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse), label = "")
+    val anim2 by infiniteTransition.animateFloat(initialValue = 0.6f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse), label = "")
+    val anim3 by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse), label = "")
+
+    Row(modifier = modifier.height(16.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim1 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim2 else 0.4f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim3 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
+    }
 }

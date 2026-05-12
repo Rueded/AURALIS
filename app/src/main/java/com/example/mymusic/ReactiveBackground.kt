@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -119,65 +120,51 @@ private fun ReactiveGradientBackground(
     modifier: Modifier,
     content: @Composable () -> Unit
 ) {
-    // 音频振幅 0..1
     var amplitude by remember { mutableStateOf(0f) }
 
-    // 平滑后的振幅（避免画面抖动）
     val smoothedAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying) amplitude else 0f,
+        targetValue = if (isPlaying) amplitude else 0f, // 💡 暂停时瞬间将目标值设为 0
         animationSpec = tween(80, easing = LinearEasing),
         label = "amplitude"
     )
 
-    // Visualizer 生命周期绑定到 Composable
     DisposableEffect(audioSessionId, isPlaying) {
         var visualizer: Visualizer? = null
-
         if (isPlaying && audioSessionId != 0) {
             try {
                 visualizer = Visualizer(audioSessionId).apply {
-                    captureSize = Visualizer.getCaptureSizeRange()[0] // 最小捕获大小，降低开销
+                    captureSize = Visualizer.getCaptureSizeRange()[0]
                     setDataCaptureListener(
                         object : Visualizer.OnDataCaptureListener {
                             override fun onWaveFormDataCapture(v: Visualizer, data: ByteArray, samplingRate: Int) {
-                                // 计算 RMS 振幅，归一化到 0..1
-                                val rms = data.map { (it.toInt() and 0xFF) - 128 }
-                                    .map { it * it.toDouble() }
-                                    .average()
+                                // 💡 加入双重保险：即使捕获到了，如果不播放也丢弃
+                                if (!isPlaying) {
+                                    amplitude = 0f
+                                    return
+                                }
+                                val rms = data.map { (it.toInt() and 0xFF) - 128 }.map { it * it.toDouble() }.average()
                                 amplitude = (Math.sqrt(rms) / 128f).toFloat().coerceIn(0f, 1f)
                             }
                             override fun onFftDataCapture(v: Visualizer, data: ByteArray, samplingRate: Int) {}
                         },
-                        Visualizer.getMaxCaptureRate() / 2,
-                        true, false
+                        Visualizer.getMaxCaptureRate() / 2, true, false
                     )
                     enabled = true
                 }
-            } catch (_: Exception) {
-                // 权限未授予或设备不支持，回退到静态渐变
-            }
+            } catch (_: Exception) {}
         }
 
         onDispose {
             try { visualizer?.enabled = false; visualizer?.release() } catch (_: Exception) {}
-            amplitude = 0f
+            amplitude = 0f // 💡 销毁时彻底归零
         }
     }
 
-    // 振幅驱动：顶部 alpha 0.30 ~ 0.85，径向范围 1200 ~ 2400
     val topAlpha  = 0.30f + smoothedAmplitude * 0.55f
     val gradRadius = 1200f + smoothedAmplitude * 1200f
 
-    // 第二色：同色相偏移 30°，给渐变增加层次
     val hsvBuf = FloatArray(3)
-    android.graphics.Color.colorToHSV(
-        android.graphics.Color.argb(
-            (dominantColor.alpha * 255).toInt(),
-            (dominantColor.red   * 255).toInt(),
-            (dominantColor.green * 255).toInt(),
-            (dominantColor.blue  * 255).toInt()
-        ), hsvBuf
-    )
+    android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
     hsvBuf[0] = (hsvBuf[0] + 30f) % 360f
     val secondColor = Color(android.graphics.Color.HSVToColor(hsvBuf))
 
@@ -189,6 +176,5 @@ private fun ReactiveGradientBackground(
         ),
         radius = gradRadius
     )
-
     Box(modifier = modifier.background(brush)) { content() }
 }
