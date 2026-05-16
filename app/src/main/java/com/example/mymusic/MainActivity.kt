@@ -112,6 +112,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 // 如果 drawRect 还是红的，补上这个：
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
+import androidx.compose.material.icons.outlined.DeleteOutline
 import com.example.mymusic.PlayerStateHolder.dominantColor
 import com.example.mymusic.ui.theme.AuralisTheme
 import kotlin.apply
@@ -319,6 +320,10 @@ object AudioCache {
                         if (resultBitmap != null) {
                             File(cacheDir, "$safeKey.webp").outputStream().use {
                                 resultBitmap!!.compress(Bitmap.CompressFormat.WEBP, 90, it)
+                            }
+                            // 👇 【新增神级修复】：如果刚下载的封面刚好是当前正在播放的歌，立刻通知全局刷新颜色！
+                            if (song.data == PlayerStateHolder.currentPath) {
+                                PlayerStateHolder.updateFromBitmap(resultBitmap!!, song.data)
                             }
                         }
                     } else {
@@ -857,18 +862,36 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     currentTitle   = mediaMetadata.title?.toString()
                     currentArtist  = mediaMetadata.artist?.toString()
                     currentArtwork = mediaMetadata.artworkData
-                    scope.launch {
-                        // 💡 一次调用同时更新封面 + 主色 + ThemeManager，所有页面自动同步
-                        PlayerStateHolder.updateFromArtworkBytes(
-                            bytes     = mediaMetadata.artworkData,
-                            audioPath = currentAudioPath
-                        )
+                    scope.launch(Dispatchers.IO) {
+                        val path = currentAudioPath
+                        if (path.isEmpty()) return@launch
+
+                        var bmp: Bitmap? = null
+                        // 1. 优先查磁盘里有没有我们存的高清 WebP
+                        val cacheFile = File(context.cacheDir, "audio_meta_cache/${path.hashCode()}.webp")
+                        if (cacheFile.exists()) {
+                            bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                        } else if (mediaMetadata.artworkData != null) {
+                            // 2. 其次才用系统解析出的自带封面
+                            val bytes = mediaMetadata.artworkData!!
+                            val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                            bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                        }
+
+                        if (bmp != null) {
+                            // 瞬间点亮全局主题色！
+                            PlayerStateHolder.updateFromBitmap(bmp, path)
+                            AudioCache.updateMemoryCacheBitmap(path, bmp.asImageBitmap())
+                        } else {
+                            PlayerStateHolder.clear() // 降级到流体渐变
+                        }
                     }
                 }
 
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentAudioPath = mediaItem?.mediaId ?: ""
+                    PlayerStateHolder.clear()
 
                     // 👇 修复后的 ReplayGain 核心智能调音逻辑
                     scope.launch(Dispatchers.IO) {
@@ -1116,8 +1139,10 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
 
                                     LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                                         itemsIndexed(items = currentProcessedSongs, key = { _, song -> song.data }) { index, song ->
+                                            val isCurrentSong = currentAudioPath == song.data
                                             SongItemUI(
-                                                song = song, index = index, isPlaying = currentAudioPath == song.data, allowMarquee = allowMarquee,
+                                                song = song, index = index, isCurrentSong = isCurrentSong, // 👈 传给新参数
+                                                isPlaying = isPlaying, allowMarquee = allowMarquee,
                                                 onClick = { onSongClickAction(song, index, currentProcessedSongs) },
                                                 onPlayNext = { onSongPlayNextAction(song) },
                                                 onAddToPlaylist = { songToAddToPlaylist = song },
@@ -1233,8 +1258,10 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                     } else {
                                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                                             itemsIndexed(items = playlistSongs, key = { _, song -> song.data }) { index, song ->
+                                                val isCurrentSong = currentAudioPath == song.data
                                                 SongItemUI(
-                                                    song = song, index = index, isPlaying = currentAudioPath == song.data, allowMarquee = allowMarquee,
+                                                    song = song, index = index, isCurrentSong = isCurrentSong, // 👈 传给新参数
+                                                    isPlaying = isPlaying, allowMarquee = allowMarquee,
                                                     onClick = { onSongClickAction(song, index, playlistSongs) },
                                                     onPlayNext = { onSongPlayNextAction(song) },
                                                     onAddToPlaylist = { songToAddToPlaylist = song },
@@ -2205,10 +2232,11 @@ fun FullScreenPlayer(
                                     )
                                 },
                                 onClick = {
-                                    playbackSpeed = speed; mediaController?.setPlaybackParameters(
-                                    PlaybackParameters(speed)
-                                ); showSpeedMenu = false
-                                })
+                                    playbackSpeed = speed
+                                    mediaController?.setPlaybackSpeed(speed) // 👇 改为 setPlaybackSpeed，完美生效！
+                                    showSpeedMenu = false
+                                }
+                            )
                         }
                     }
                 }
@@ -2516,20 +2544,25 @@ fun FullScreenPlayer(
                                     }
                                 }
                             }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新歌词")
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
                             }
 
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
                                     OnlineLyricsRepository.clearCache(audioPath, context)
+                                    // 👇 一并斩杀错误的封面缓存！
+                                    val cacheFile = File(context.cacheDir, "audio_meta_cache/${audioPath.hashCode()}.webp")
+                                    if (cacheFile.exists()) cacheFile.delete()
                                     withContext(Dispatchers.Main) {
                                         lrcLines = emptyList()
                                         lyricsSource = LyricsSource.LOCAL
-                                        android.widget.Toast.makeText(context, "错误歌词已经被云糯删掉啦！", android.widget.Toast.LENGTH_SHORT).show()
+                                        PlayerStateHolder.clear() // 重置颜色
+                                        android.widget.Toast.makeText(context, "错误歌词和封面已清除！", android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }) {
-                                Icon(Icons.Outlined.Delete, contentDescription = "删除歌词")
+                                // 使用高级镂空垃圾桶图标，并赋予主题色
+                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
                             }
                             Spacer(Modifier.width(16.dp))
 
@@ -3009,20 +3042,25 @@ fun FullScreenPlayer(
                                         }
                                     }
                                 }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = "刷新歌词")
+                                    Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
                                 }
 
                                 IconButton(onClick = {
                                     scope.launch(Dispatchers.IO) {
                                         OnlineLyricsRepository.clearCache(audioPath, context)
+                                        // 👇 一并斩杀错误的封面缓存！
+                                        val cacheFile = File(context.cacheDir, "audio_meta_cache/${audioPath.hashCode()}.webp")
+                                        if (cacheFile.exists()) cacheFile.delete()
                                         withContext(Dispatchers.Main) {
                                             lrcLines = emptyList()
                                             lyricsSource = LyricsSource.LOCAL
-                                            android.widget.Toast.makeText(context, "错误歌词已经被云糯删掉啦！", android.widget.Toast.LENGTH_SHORT).show()
+                                            PlayerStateHolder.clear() // 重置颜色
+                                            android.widget.Toast.makeText(context, "错误歌词和封面已清除！", android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 }) {
-                                    Icon(Icons.Outlined.Delete, contentDescription = "删除歌词")
+                                    // 使用高级镂空垃圾桶图标，并赋予主题色
+                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
                                 }
                                 Spacer(Modifier.width(8.dp))
                             }

@@ -41,34 +41,23 @@ object PlayerStateHolder {
     // 从 ByteArray（MediaMetadata.artworkData）更新
     // 在 onMediaMetadataChanged 里调用
     // ─────────────────────────────────────────────────────────────────────────
-    suspend fun updateFromArtworkBytes(
-        bytes: ByteArray?,
-        audioPath: String
-    ) = withContext(Dispatchers.IO) {
+    suspend fun updateFromArtworkBytes(bytes: ByteArray?, audioPath: String) = withContext(Dispatchers.IO) {
         _currentPath = audioPath
         if (bytes == null) {
-            _coverBitmap.value = null
-            _dominantColor.value = null
+            // 🚨 核心防御：如果 ExoPlayer 传来 null，千万不要 clear！
+            // 否则会把爬虫刚下载好的网络封面瞬间抹杀，导致主题色变成黑屏！
             return@withContext
         }
         try {
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                ?: return@withContext
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext
             applyBitmap(bmp, audioPath)
         } catch (e: Exception) {
             android.util.Log.e("PlayerStateHolder", "updateFromArtworkBytes 失败", e)
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 从网络/磁盘缓存拿到的 Bitmap 更新（CoverFetcher 拿到结果后调用）
-    // ─────────────────────────────────────────────────────────────────────────
-    suspend fun updateFromBitmap(
-        bitmap: Bitmap,
-        audioPath: String
-    ) = withContext(Dispatchers.IO) {
-        // 防止慢速网络请求拿到旧曲封面后覆盖了新曲
-        if (audioPath != _currentPath) return@withContext
+    suspend fun updateFromBitmap(bitmap: Bitmap, audioPath: String) = withContext(Dispatchers.IO) {
+        _currentPath = audioPath // 🚨 强行同步路径，不再拒绝网络封面的更新
         applyBitmap(bitmap, audioPath)
     }
 

@@ -214,7 +214,8 @@ fun HomeHeader(
 fun SongItemUI(
     song: Song,
     index: Int,
-    isPlaying: Boolean,
+    isCurrentSong: Boolean, // 👈 新增参数：标记是不是“当前选中”的歌
+    isPlaying: Boolean,     // 👈 原有的，代表全局是否正在发出声音
     allowMarquee: Boolean,
     onClick: () -> Unit,
     onPlayNext: () -> Unit,
@@ -228,6 +229,14 @@ fun SongItemUI(
     val cachedInfo = AudioCache.getFromMemory(song.data)
     var spec   by remember(song.data) { mutableStateOf(cachedInfo?.spec) }
     var bitmap by remember(song.data) { mutableStateOf(cachedInfo?.bitmap) }
+
+    val globalCover by PlayerStateHolder.coverBitmap.collectAsState()
+    LaunchedEffect(globalCover, isCurrentSong) {
+        // 只有当前正在播放的那首歌，才允许它强行更新为全局下载的高清封面！
+        if (isCurrentSong && globalCover != null) {
+            bitmap = globalCover
+        }
+    }
 
     var showButtonMenu    by remember { mutableStateOf(false) }
     var showTouchMenu     by remember { mutableStateOf(false) }
@@ -273,9 +282,7 @@ fun SongItemUI(
 
     // 播放中行高亮
     val rowBg by animateColorAsState(
-        targetValue = if (isPlaying)
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
-        else Color.Transparent,
+        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.primary.copy(alpha = 0.07f) else Color.Transparent,
         animationSpec = tween(400), label = "rowBg"
     )
 
@@ -343,10 +350,7 @@ fun SongItemUI(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 序号
-            Text(
-                "${index + 1}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isPlaying) MaterialTheme.colorScheme.primary else Color.Gray,
+            Text("${index + 1}", color = if (isCurrentSong) MaterialTheme.colorScheme.primary else Color.Gray,
                 modifier = Modifier.width(28.dp),
                 textAlign = TextAlign.Center
             )
@@ -373,14 +377,9 @@ fun SongItemUI(
                     )
                 }
                 // ── 修复：isPlaying=false 时律动条不再显示 ──────────────────
-                if (isPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        PlayingWaveform(isPlaying = true)
+                if (isCurrentSong) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                        PlayingWaveform(isPlaying = isPlaying) // 👈 只有这里用 isPlaying，决定它跳不跳！
                     }
                 }
             }
@@ -393,7 +392,7 @@ fun SongItemUI(
                     Text(
                         song.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (isPlaying) MaterialTheme.colorScheme.primary
+                        color = if (isCurrentSong) MaterialTheme.colorScheme.primary
                         else Color.Unspecified,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -460,7 +459,7 @@ fun SongItemUI(
         }
 
         // 播放中左侧竖线
-        if (isPlaying) {
+        if (isCurrentSong) {
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
@@ -504,30 +503,25 @@ fun PlayingWaveform(isPlaying: Boolean) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         repeat(3) { i ->
-            // 停止时固定高度 4dp，播放时才动
             val height by if (isPlaying) {
                 infiniteTransition.animateFloat(
-                    initialValue = 4f,
-                    targetValue  = 16f,
+                    initialValue = 4f, targetValue = 16f,
                     animationSpec = infiniteRepeatable(
-                        animation  = tween(
-                            durationMillis = 500,
-                            delayMillis    = i * 120,
-                            easing         = FastOutSlowInEasing
-                        ),
-                        repeatMode = RepeatMode.Reverse
+                        tween(
+                            500,
+                            delayMillis = i * 120,
+                            easing = FastOutSlowInEasing
+                        ), RepeatMode.Reverse
                     ),
                     label = "bar$i"
                 )
             } else {
-                remember { mutableStateOf(4f) }
+                // 暂停时，平滑降落回 4f
+                animateFloatAsState(targetValue = 4f, animationSpec = tween(300), label = "stopBar")
             }
 
             Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(height.dp)
-                    .clip(RoundedCornerShape(2.dp))
+                modifier = Modifier.width(3.dp).height(height.dp).clip(RoundedCornerShape(2.dp))
                     .background(Color.White.copy(alpha = 0.9f))
             )
         }

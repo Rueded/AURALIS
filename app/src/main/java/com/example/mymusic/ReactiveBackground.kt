@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -71,43 +72,36 @@ private fun BreathingGradientBackground(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "breathing")
 
-    val topAlpha by if (isPlaying) {
-        infiniteTransition.animateFloat(
-            initialValue = 0.35f,
-            targetValue  = 0.70f,
-            animationSpec = infiniteRepeatable(
-                animation  = tween(2800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "breatheAlpha"
-        )
-    } else {
-        remember { mutableStateOf(0.40f) }
-    }
+    // 1. 让动画永远在后台呼吸运转
+    val breatheAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f, targetValue = 0.70f,
+        animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breatheAlpha"
+    )
+    val breatheScale by infiniteTransition.animateFloat(
+        initialValue = 0.70f, targetValue = 1.00f,
+        animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breatheScale"
+    )
 
-    val radialScale by if (isPlaying) {
-        infiniteTransition.animateFloat(
-            initialValue = 0.70f,
-            targetValue  = 1.00f,
-            animationSpec = infiniteRepeatable(
-                animation  = tween(2800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "breatheScale"
-        )
-    } else {
-        remember { mutableStateOf(0.70f) }
-    }
+    // 2. 利用 animateFloatAsState 负责把控状态切换的“渐变平滑度”！
+    val currentAlpha by animateFloatAsState(
+        targetValue = if (isPlaying) breatheAlpha else 0.40f, // 暂停时平滑过渡到 0.40
+        animationSpec = tween(800), label = "alphaTransition"
+    )
+    val currentScale by animateFloatAsState(
+        targetValue = if (isPlaying) breatheScale else 0.85f, // 暂停时平滑收缩到 0.85
+        animationSpec = tween(800), label = "scaleTransition"
+    )
 
     val brush = Brush.radialGradient(
         colors = listOf(
-            dominantColor.copy(alpha = topAlpha),
-            dominantColor.copy(alpha = topAlpha * 0.45f),
+            dominantColor.copy(alpha = currentAlpha),
+            dominantColor.copy(alpha = currentAlpha * 0.45f),
             surface.copy(alpha = 1f)
         ),
-        radius = 1800f * radialScale
+        radius = 1800f * currentScale
     )
-
     Box(modifier = modifier.background(brush)) { content() }
 }
 
@@ -117,88 +111,33 @@ private fun ReactiveGradientBackground(
     dominantColor: Color,
     surface: Color,
     isPlaying: Boolean,
-    audioSessionId: Int,
+    audioSessionId: Int, // 不再需要这个破参数啦
     modifier: Modifier,
     content: @Composable () -> Unit
 ) {
-    var amplitude by remember { mutableStateOf(0f) }
+    var currentAmp by remember { mutableStateOf(0f) }
 
-    // 💡 修复1：smoothedAmplitude 目标值由 isPlaying 控制，暂停时归零
+    // 直接从底层的自研处理器中抽取数据！
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (isActive) {
+                currentAmp = VisualizerData.amplitude
+                delay(16L) // 维持 60fps 刷新率
+            }
+        } else {
+            currentAmp = 0f
+            VisualizerData.amplitude = 0f
+        }
+    }
+
+    // 平滑过滤数值，防止爆音导致的画面闪烁
     val smoothedAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying) amplitude else 0f,
+        targetValue = currentAmp,
         animationSpec = tween(80, easing = LinearEasing),
         label = "amplitude"
     )
 
-    // 💡 修复2：key 加入 isPlaying，停止播放时立刻 release Visualizer
-    DisposableEffect(audioSessionId, isPlaying) {
-        var visualizer: Visualizer? = null
-
-        if (isPlaying && audioSessionId != 0) {
-            try {
-                visualizer = Visualizer(audioSessionId).apply {
-                    // 💡 修复3：使用最大 captureSize，数据更丰富，RMS 更准确
-                    captureSize = Visualizer.getCaptureSizeRange()[1]
-
-                    setDataCaptureListener(
-                        object : Visualizer.OnDataCaptureListener {
-                            override fun onWaveFormDataCapture(
-                                v: Visualizer,
-                                data: ByteArray,
-                                samplingRate: Int
-                            ) {
-                                if (!isPlaying) {
-                                    amplitude = 0f
-                                    return
-                                }
-                                // 💡 修复4：避免 .map{}.map{} 链式操作产生大量临时对象
-                                // 改成手动循环，零 GC 压力
-                                var sumSq = 0.0
-                                for (b in data) {
-                                    val s = (b.toInt() and 0xFF) - 128
-                                    sumSq += s.toLong() * s
-                                }
-                                val rms = Math.sqrt(sumSq / data.size)
-                                amplitude = (rms / 128.0).toFloat().coerceIn(0f, 1f)
-                            }
-
-                            override fun onFftDataCapture(
-                                v: Visualizer,
-                                data: ByteArray,
-                                samplingRate: Int
-                            ) {}
-                        },
-                        Visualizer.getMaxCaptureRate() / 2,
-                        true,
-                        false
-                    )
-                    enabled = true
-                }
-                Log.d(TAG, "Visualizer 初始化成功，session=$audioSessionId")
-            } catch (e: Exception) {
-                // 💡 修复5：不再吞异常，明确打印，方便排查权限和 session 问题
-                Log.e(TAG, "Visualizer 初始化失败（session=$audioSessionId）：${e.message}", e)
-            }
-        } else {
-            // 💡 修复6：不播放时立刻把 amplitude 归零，不等 Compose 动画侧下一帧
-            amplitude = 0f
-        }
-
-        onDispose {
-            try {
-                // 💡 修复7：先 disable 再 release，确保 AudioEffect 完全从 session 解绑
-                // 这样 BitPerfect 模式才能正常获得纯净链路
-                visualizer?.enabled = false
-                visualizer?.release()
-                Log.d(TAG, "Visualizer 已 release，session=$audioSessionId")
-            } catch (e: Exception) {
-                Log.e(TAG, "Visualizer release 失败：${e.message}", e)
-            }
-            amplitude = 0f
-        }
-    }
-
-    val topAlpha   = 0.30f + smoothedAmplitude * 0.55f
+    val topAlpha  = 0.30f + smoothedAmplitude * 0.55f
     val gradRadius = 1200f + smoothedAmplitude * 1200f
 
     val hsvBuf = FloatArray(3)

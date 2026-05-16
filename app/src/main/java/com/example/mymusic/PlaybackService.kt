@@ -27,6 +27,59 @@ import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.nio.ByteBuffer
+import kotlin.math.sqrt
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.BaseAudioProcessor
+
+object VisualizerData {
+    @Volatile var amplitude: Float = 0f
+}
+
+@UnstableApi
+class AuralisVisualizerProcessor : BaseAudioProcessor() {
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        return inputAudioFormat
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val remaining = inputBuffer.remaining()
+        if (remaining == 0) return
+
+        val isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
+        val is16Bit = inputAudioFormat.encoding == C.ENCODING_PCM_16BIT
+
+        var sumSq = 0.0
+        var count = 0
+        val origPos = inputBuffer.position()
+
+        if (isFloat) {
+            val floatBuf = inputBuffer.asFloatBuffer()
+            while (floatBuf.hasRemaining()) {
+                val sample = floatBuf.get()
+                sumSq += sample * sample
+                count++
+            }
+        } else if (is16Bit) {
+            val shortBuf = inputBuffer.asShortBuffer()
+            while (shortBuf.hasRemaining()) {
+                val sample = shortBuf.get() / 32768.0
+                sumSq += sample * sample
+                count++
+            }
+        }
+
+        if (count > 0) {
+            val rms = sqrt(sumSq / count).toFloat()
+            VisualizerData.amplitude = (rms * 2.5f).coerceIn(0f, 1f)
+        }
+
+        inputBuffer.position(origPos)
+        val outputBuffer = replaceOutputBuffer(remaining)
+        outputBuffer.put(inputBuffer)
+        outputBuffer.flip()
+    }
+}
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -62,7 +115,8 @@ class PlaybackService : MediaSessionService() {
                 enableAudioOutputPlaybackParams: Boolean
             ): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(true) // 32bit 浮点，保护动态范围
+                    .setAudioProcessors(arrayOf(AuralisVisualizerProcessor()))
+                    .setEnableFloatOutput(true) // 保持 32-bit Float！
                     .build()
             }
         }
@@ -97,7 +151,7 @@ class PlaybackService : MediaSessionService() {
         val isBitPerfectEnabled = prefs.getBoolean("enable_bit_perfect", false)
 
         // [修复2] 先根据 Bit-perfect 开关决定 Offload 策略，再激活 Bit-perfect
-        applyOffloadPreference(builtPlayer, enableOffload = !isBitPerfectEnabled)
+        applyOffloadPreference(builtPlayer, enableOffload = false)
         applyUsbBitPerfectSetting(isBitPerfectEnabled)
 
         // ── 6. 通知栏跳转 ──
@@ -188,7 +242,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         // [修复2] Bit-perfect 状态变化时同步调整 Offload
-        player?.let { applyOffloadPreference(it, enableOffload = !isCurrentlyBitPerfect) }
+        //player?.let { applyOffloadPreference(it, enableOffload = !isCurrentlyBitPerfect) }
     }
 
     private fun tryEnableUsbBitPerfect(requestedSampleRate: Int, requestedBitDepth: Int) {
