@@ -176,6 +176,12 @@ class PlaybackService : MediaSessionService() {
             return
         }
         if (enable) {
+            // 💡 开启 BitPerfect 之前，必须确保 Visualizer 已经从 AudioSession 解绑
+            // 否则系统会认为 DSP 还挂着，导致 setPreferredMixerAttributes 失败
+            // Visualizer 的实际 release 由 ReactiveBackground DisposableEffect 负责，
+            // 这里只需要强制让 ExoPlayer 重建 AudioSession
+            player?.stop()
+            player?.prepare()
             tryEnableUsbBitPerfect(sampleRate, bitDepth)
         } else {
             tryDisableUsbBitPerfect()

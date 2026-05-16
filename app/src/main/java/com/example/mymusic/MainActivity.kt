@@ -112,6 +112,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 // 如果 drawRect 还是红的，补上这个：
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
+import com.example.mymusic.PlayerStateHolder.dominantColor
 import com.example.mymusic.ui.theme.AuralisTheme
 import kotlin.apply
 
@@ -402,6 +403,11 @@ enum class AudioLevel(val label: String, val color: Color) {
 class MainActivity : ComponentActivity() {
     val shouldOpenPlayer = mutableStateOf(false)
 
+    private val requestAudioPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.d("Auralis", if (granted) "RECORD_AUDIO 权限已授予" else "RECORD_AUDIO 权限被拒绝，Visualizer 将不可用")
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
@@ -412,6 +418,11 @@ class MainActivity : ComponentActivity() {
                      MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
                  }
             }
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -843,17 +854,15 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             shuffleMode = controller.shuffleModeEnabled
             controller.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                    currentTitle = mediaMetadata.title?.toString()
-                    currentArtist = mediaMetadata.artist?.toString()
+                    currentTitle   = mediaMetadata.title?.toString()
+                    currentArtist  = mediaMetadata.artist?.toString()
                     currentArtwork = mediaMetadata.artworkData
-                    val artBytes = mediaMetadata.artworkData
-                    if (artBytes != null) {
-                        scope.launch {
-                            val bmp = withContext(Dispatchers.IO) {
-                                BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
-                            }
-                            if (bmp != null) ThemeManager.updateFromArtwork(bmp)
-                        }
+                    scope.launch {
+                        // 💡 一次调用同时更新封面 + 主色 + ThemeManager，所有页面自动同步
+                        PlayerStateHolder.updateFromArtworkBytes(
+                            bytes     = mediaMetadata.artworkData,
+                            audioPath = currentAudioPath
+                        )
                     }
                 }
 
@@ -1767,34 +1776,13 @@ fun FullScreenPlayer(
             }
         }
 
-        var dominantColor by remember { mutableStateOf<Color?>(null) }
+        val rawDominantColor by PlayerStateHolder.dominantColor.collectAsState()
         val animatedDominantColor by animateColorAsState(
-            targetValue = dominantColor ?: MaterialTheme.colorScheme.primaryContainer,
+            targetValue = rawDominantColor ?: MaterialTheme.colorScheme.primaryContainer,
             animationSpec = tween(1500, easing = LinearEasing),
             label = "dominantColor"
         )
 
-        LaunchedEffect(artwork, audioPath) { // 加上 audioPath 监听
-            if (artwork != null) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val bmp = BitmapFactory.decodeByteArray(artwork, 0, artwork.size)
-                        val palette = androidx.palette.graphics.Palette.from(bmp).generate()
-                        // 提取颜色
-                        val rgb = palette.vibrantSwatch?.rgb ?: palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb
-                        if (rgb != null) {
-                            withContext(Dispatchers.Main) { dominantColor = Color(rgb) }
-                        }
-                    } catch (e: Exception) {
-                        // 如果提取失败，用 fallback
-                        withContext(Dispatchers.Main) { dominantColor = fallbackColors[0] }
-                    }
-                }
-            } else {
-                // C. 【重点】没有封面时，直接让背景颜色等于随机生成的优雅色第一个
-                dominantColor = fallbackColors[0]
-            }
-        }
 
         val currentLyricIndex = remember(
             currentPosition,
@@ -2508,6 +2496,41 @@ fun FullScreenPlayer(
                             TextButton(onClick = {
                                 lyricsFontSize = (lyricsFontSize + 2f).coerceAtMost(36f)
                             }) { Text("A+", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                            IconButton(onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    // 为了防止串歌，云糯帮你从数据库里查最准确的名字哦
+                                    val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                                    val safeTitle = dbSong?.title ?: title
+                                    val safeArtist = dbSong?.artist ?: artist
+
+                                    val result = OnlineLyricsRepository.refreshFromNetwork(
+                                        audioPath = audioPath,
+                                        title = safeTitle,
+                                        artist = safeArtist,
+                                        context = context
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        lrcLines = result.lines
+                                        lyricsSource = result.source
+                                        android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新歌词")
+                            }
+
+                            IconButton(onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    OnlineLyricsRepository.clearCache(audioPath, context)
+                                    withContext(Dispatchers.Main) {
+                                        lrcLines = emptyList()
+                                        lyricsSource = LyricsSource.LOCAL
+                                        android.widget.Toast.makeText(context, "错误歌词已经被云糯删掉啦！", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = "删除歌词")
+                            }
                             Spacer(Modifier.width(16.dp))
 
                             // 👇 修复 1：把颜色获取放到 Canvas 外面 (Composable 作用域内)
@@ -2742,24 +2765,12 @@ fun FullScreenPlayer(
                                                         // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
                                                         val bitmap = CoverFetcher.fetchHighResCover(title, artist)
                                                         if (bitmap != null) {
-                                                            imgFile.outputStream().use {
-                                                                bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
-                                                            }
-
-                                                            // 👇 核心修复 1：立刻提取颜色并强制更新全屏背景！
-                                                            val palette = androidx.palette.graphics.Palette.from(bitmap).generate()
-                                                            val rgb = palette.vibrantSwatch?.rgb ?: palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb
-                                                            if (rgb != null) {
-                                                                withContext(Dispatchers.Main) { dominantColor = Color(rgb) }
-                                                            }
-
-                                                            val bmpImg = bitmap.asImageBitmap()
-                                                            // 👇 核心修复 2：同步给首页缓存
-                                                            AudioCache.updateMemoryCacheBitmap(path, bmpImg)
-                                                            // 👇 核心修复 3：通知全局 ThemeManager 变色！
-                                                            ThemeManager.updateFromArtwork(bitmap)
-
-                                                            bmpImg
+                                                            // 写磁盘缓存
+                                                            imgFile.outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it) }
+                                                            // 💡 单次调用，主色 + Theme + 全局封面同步一起完成
+                                                            PlayerStateHolder.updateFromBitmap(bitmap, path)
+                                                            AudioCache.updateMemoryCacheBitmap(path, bitmap.asImageBitmap())
+                                                            bitmap.asImageBitmap()
                                                         } else {
                                                             null
                                                         }
@@ -2978,7 +2989,42 @@ fun FullScreenPlayer(
                                         fontSize = 18.sp,
                                         fontWeight = FontWeight.Bold
                                     )
-                                }; Spacer(Modifier.width(8.dp))
+                                }; IconButton(onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        // 为了防止串歌，云糯帮你从数据库里查最准确的名字哦
+                                        val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                                        val safeTitle = dbSong?.title ?: title
+                                        val safeArtist = dbSong?.artist ?: artist
+
+                                        val result = OnlineLyricsRepository.refreshFromNetwork(
+                                            audioPath = audioPath,
+                                            title = safeTitle,
+                                            artist = safeArtist,
+                                            context = context
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            lrcLines = result.lines
+                                            lyricsSource = result.source
+                                            android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "刷新歌词")
+                                }
+
+                                IconButton(onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        OnlineLyricsRepository.clearCache(audioPath, context)
+                                        withContext(Dispatchers.Main) {
+                                            lrcLines = emptyList()
+                                            lyricsSource = LyricsSource.LOCAL
+                                            android.widget.Toast.makeText(context, "错误歌词已经被云糯删掉啦！", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }) {
+                                    Icon(Icons.Outlined.Delete, contentDescription = "删除歌词")
+                                }
+                                Spacer(Modifier.width(8.dp))
                             }
 
                             // 👇 修复 2：竖屏同样提取颜色
@@ -3197,24 +3243,12 @@ fun FullScreenPlayer(
                                                     // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
                                                     val bitmap = CoverFetcher.fetchHighResCover(title, artist)
                                                     if (bitmap != null) {
-                                                        imgFile.outputStream().use {
-                                                            bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
-                                                        }
-
-                                                        // 👇 核心修复 1：立刻提取颜色并强制更新全屏背景！
-                                                        val palette = androidx.palette.graphics.Palette.from(bitmap).generate()
-                                                        val rgb = palette.vibrantSwatch?.rgb ?: palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb
-                                                        if (rgb != null) {
-                                                            withContext(Dispatchers.Main) { dominantColor = Color(rgb) }
-                                                        }
-
-                                                        val bmpImg = bitmap.asImageBitmap()
-                                                        // 👇 核心修复 2：同步给首页缓存
-                                                        AudioCache.updateMemoryCacheBitmap(path, bmpImg)
-                                                        // 👇 核心修复 3：通知全局 ThemeManager 变色！
-                                                        ThemeManager.updateFromArtwork(bitmap)
-
-                                                        bmpImg
+                                                        // 写磁盘缓存
+                                                        imgFile.outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it) }
+                                                        // 💡 单次调用，主色 + Theme + 全局封面同步一起完成
+                                                        PlayerStateHolder.updateFromBitmap(bitmap, path)
+                                                        AudioCache.updateMemoryCacheBitmap(path, bitmap.asImageBitmap())
+                                                        bitmap.asImageBitmap()
                                                     } else {
                                                         null
                                                     }
