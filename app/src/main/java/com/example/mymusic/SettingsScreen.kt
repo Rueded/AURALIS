@@ -153,6 +153,24 @@ fun SettingsScreen(
                             FilterChip(selected = bgMode == mode, onClick = { bgMode = mode; prefs.edit().putString("bg_mode", mode.name).apply() }, label = { Text(mode.label, fontSize = 12.sp) })
                         }
                     }
+
+                    // 👇 云糯新增：专属于“音频响应”的灵敏度滑块！
+                    AnimatedVisibility(visible = bgMode == BackgroundMode.REACTIVE) {
+                        Column(modifier = Modifier.padding(top = 16.dp)) {
+                            var sensitivity by remember { mutableFloatStateOf(prefs.getFloat("reactive_sensitivity", 1.5f)) }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                                Text("律动灵敏度", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(String.format("%.1fx", sensitivity), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                            Slider(
+                                value = sensitivity,
+                                onValueChange = { sensitivity = it },
+                                onValueChangeFinished = { prefs.edit().putFloat("reactive_sensitivity", sensitivity).apply() },
+                                valueRange = 0.5f..3.0f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
             }
 

@@ -74,6 +74,13 @@ class PlaybackService : MediaSessionService() {
             .setLoadControl(loadControl)
             .build()
 
+        // 👇 云糯修复：添加底层监听器，一旦发声瞬间捕获真实的 AudioSessionId！
+        builtPlayer.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(sessionId: Int) {
+                audioSessionId = sessionId
+            }
+        })
+
         player = builtPlayer
         audioSessionId = builtPlayer.audioSessionId
 

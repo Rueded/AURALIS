@@ -101,41 +101,86 @@ private fun ReactiveGradientBackground(
     modifier: Modifier,
     content: @Composable () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", android.content.Context.MODE_PRIVATE) }
     var currentAmp by remember { mutableStateOf(0f) }
 
+    // 1. 读取灵敏度，并抓取音频振幅
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (isActive) {
-                currentAmp = VisualizerData.amplitude
-                delay(16L) // 60fps 刷新率
+                // 实时读取设置里的灵敏度，不需要重启！
+                val sensitivity = prefs.getFloat("reactive_sensitivity", 1.5f)
+                // 放大系数并限制最高值，防止爆音变成纯白
+                currentAmp = (VisualizerData.amplitude * sensitivity).coerceIn(0f, 1f)
+                delay(16L) // 60fps
             }
         } else {
             currentAmp = 0f
-            VisualizerData.amplitude = 0f
         }
     }
 
+    // 2. 律动平滑过渡 (让急促的鼓点变成柔和的光晕爆发)
     val smoothedAmplitude by animateFloatAsState(
         targetValue = currentAmp,
-        animationSpec = tween(80, easing = LinearEasing),
+        animationSpec = tween(120, easing = LinearEasing),
         label = "amplitude"
     )
 
-    val topAlpha = 0.30f + smoothedAmplitude * 0.55f
-    val gradRadius = 1200f + smoothedAmplitude * 1200f
+    // 3. Apple Music 级别的随机缓慢游走 (用正弦余弦打造漂浮感)
+    val infiniteTransition = rememberInfiniteTransition(label = "ambient")
+    val phase1 by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(13000, easing = LinearEasing)), label = "p1")
+    val phase2 by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(17000, easing = LinearEasing)), label = "p2")
 
+    // 4. 计算左右两个高级渐变色 (色相偏移法)
     val hsvBuf = FloatArray(3)
     android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
-    hsvBuf[0] = (hsvBuf[0] + 30f) % 360f
-    val secondColor = Color(android.graphics.Color.HSVToColor(hsvBuf))
+    val baseHue = hsvBuf[0]
+    val baseSat = hsvBuf[1]
 
-    val brush = Brush.radialGradient(
-        colors = listOf(
-            dominantColor.copy(alpha = topAlpha),
-            secondColor.copy(alpha = topAlpha * 0.5f),
-            surface.copy(alpha = 1f)
-        ),
-        radius = gradRadius
-    )
-    Box(modifier = modifier.background(brush)) { content() }
+    // 左侧偏冷色，右侧偏暖色
+    hsvBuf[0] = (baseHue - 25f + 360f) % 360f
+    hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
+    val colorLeft = Color(android.graphics.Color.HSVToColor(hsvBuf))
+
+    hsvBuf[0] = (baseHue + 25f) % 360f
+    hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
+    val colorRight = Color(android.graphics.Color.HSVToColor(hsvBuf))
+
+    // 5. 核心绘制：双星环绕流体
+    Box(modifier = modifier.drawBehind {
+        // 底色铺垫
+        drawRect(dominantColor.copy(alpha = 0.2f))
+
+        val rad1 = Math.toRadians(phase1.toDouble())
+        val rad2 = Math.toRadians(phase2.toDouble())
+
+        // 👈 左侧律动光晕
+        val leftRadius = size.maxDimension * (0.45f + smoothedAmplitude * 0.35f)
+        val leftX = size.width * 0.25f + kotlin.math.sin(rad1).toFloat() * size.width * 0.15f
+        val leftY = size.height * 0.3f + kotlin.math.cos(rad1 * 0.8).toFloat() * size.height * 0.1f
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(colorLeft.copy(alpha = 0.45f + smoothedAmplitude * 0.4f), Color.Transparent),
+                center = androidx.compose.ui.geometry.Offset(leftX, leftY),
+                radius = leftRadius
+            ),
+            radius = leftRadius,
+            center = androidx.compose.ui.geometry.Offset(leftX, leftY)
+        )
+
+        // 👉 右侧律动光晕
+        val rightRadius = size.maxDimension * (0.5f + smoothedAmplitude * 0.4f)
+        val rightX = size.width * 0.75f + kotlin.math.cos(rad2).toFloat() * size.width * 0.15f
+        val rightY = size.height * 0.6f + kotlin.math.sin(rad2 * 1.1).toFloat() * size.height * 0.1f
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(colorRight.copy(alpha = 0.45f + smoothedAmplitude * 0.4f), Color.Transparent),
+                center = androidx.compose.ui.geometry.Offset(rightX, rightY),
+                radius = rightRadius
+            ),
+            radius = rightRadius,
+            center = androidx.compose.ui.geometry.Offset(rightX, rightY)
+        )
+    }) { content() }
 }
