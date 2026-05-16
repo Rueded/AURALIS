@@ -207,44 +207,75 @@ object VisualizerData {
 
 @UnstableApi
 class AuralisVisualizerProcessor : androidx.media3.common.audio.BaseAudioProcessor() {
+    private var filterState = 0.0f
+    private val alphaLpf = 0.12f // 优化低通系数，完美捕捉底鼓和贝斯
+
     override fun onConfigure(inputAudioFormat: androidx.media3.common.audio.AudioProcessor.AudioFormat): androidx.media3.common.audio.AudioProcessor.AudioFormat {
         return inputAudioFormat
     }
 
-    override fun queueInput(inputBuffer: ByteBuffer) {
+    override fun queueInput(inputBuffer: java.nio.ByteBuffer) {
         val remaining = inputBuffer.remaining()
         if (remaining == 0) return
 
-        val isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
-        val is16Bit = inputAudioFormat.encoding == C.ENCODING_PCM_16BIT
+        // 🚨 史诗级修复：强制使用 Native Endian 字节序！
+        // 彻底解决 Float = true 时读反数据导致 NaN 罢工的问题！
+        val buffer = inputBuffer.asReadOnlyBuffer().order(java.nio.ByteOrder.nativeOrder())
+        val encoding = inputAudioFormat.encoding
+
         var sumSq = 0.0
         var count = 0
-        val origPos = inputBuffer.position()
 
-        if (isFloat) {
-            val floatBuf = inputBuffer.asFloatBuffer()
-            while (floatBuf.hasRemaining()) {
-                val sample = floatBuf.get()
-                sumSq += sample * sample
-                count++
+        when (encoding) {
+            androidx.media3.common.C.ENCODING_PCM_16BIT -> {
+                val shortBuf = buffer.asShortBuffer()
+                while (shortBuf.hasRemaining()) {
+                    val sample = shortBuf.get() / 32768f
+                    filterState += alphaLpf * (sample - filterState)
+                    sumSq += filterState * filterState
+                    count++
+                }
             }
-        } else if (is16Bit) {
-            val shortBuf = inputBuffer.asShortBuffer()
-            while (shortBuf.hasRemaining()) {
-                val sample = shortBuf.get() / 32768.0
-                sumSq += sample * sample
-                count++
+            androidx.media3.common.C.ENCODING_PCM_FLOAT -> {
+                val floatBuf = buffer.asFloatBuffer()
+                while (floatBuf.hasRemaining()) {
+                    val sample = floatBuf.get()
+                    filterState += alphaLpf * (sample - filterState)
+                    sumSq += filterState * filterState
+                    count++
+                }
+            }
+            androidx.media3.common.C.ENCODING_PCM_24BIT,
+            androidx.media3.common.C.ENCODING_PCM_32BIT -> {
+                val bytesPerSample = if (encoding == androidx.media3.common.C.ENCODING_PCM_24BIT) 3 else 4
+                val maxVal = if (bytesPerSample == 3) 8388608f else 2147483648f
+                while (buffer.remaining() >= bytesPerSample) {
+                    var intVal = 0
+                    if (bytesPerSample == 3) {
+                        val b1 = buffer.get().toInt() and 0xFF
+                        val b2 = buffer.get().toInt() and 0xFF
+                        val b3 = buffer.get().toInt()
+                        intVal = b1 or (b2 shl 8) or (b3 shl 16)
+                    } else {
+                        intVal = buffer.getInt()
+                    }
+                    val sample = intVal / maxVal
+                    filterState += alphaLpf * (sample - filterState)
+                    sumSq += filterState * filterState
+                    count++
+                }
             }
         }
 
         if (count > 0) {
-            val rms = sqrt(sumSq / count).toFloat()
-            // 👇 增加了拦截器的敏感度，让波浪起伏更剧烈！
-            VisualizerData.amplitude = (rms * 4.0f).coerceIn(0f, 1f)
+            val rms = kotlin.math.sqrt(sumSq / count).toFloat()
+            VisualizerData.amplitude = rms
         }
 
-        inputBuffer.position(origPos)
+        // 无损复制，绝不破坏 LHDC 和 DAC 音质！
+        val origPos = inputBuffer.position()
         val outputBuffer = replaceOutputBuffer(remaining)
+        inputBuffer.position(origPos)
         outputBuffer.put(inputBuffer)
         outputBuffer.flip()
     }
