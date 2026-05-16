@@ -68,16 +68,8 @@ AURALIS 可以作为电脑的外接声卡，播放电脑上的声音：
 1. 在 AURALIS 的「设置」-「连接与同步」中开启 **PC 有线音箱模式**。
 2. 使用数据线连接手机与电脑，开启手机的 **USB 调试** 模式。
 3. 在电脑终端（终端/CMD）运行以下命令进行端口转发：
-
-```
-
-```text
-Fetched content: Successfully generated AURALIS_README.md
-
-```bash
-   adb reverse tcp:8899 tcp:8899
-
-```
+'''bash
+adb reverse tcp:8899 tcp:8899
 
 4. 在电脑端启动音频推流脚本，此时电脑的音频即可通过 8899 端口极低延迟无损传输至手机播放！
 
@@ -86,7 +78,7 @@ Fetched content: Successfully generated AURALIS_README.md
 ## 📜 隐私与开源协议 (License & Privacy)
 
 * 本项目致力于提供纯粹的本地播放体验，**绝不主动收集或上传任何用户隐私数据**。
-* 本项目基于 [MIT License](https://www.google.com/search?q=LICENSE) 协议开源。欢迎提交 Issue 与 Pull Request 共同完善！
+* 本项目基于 [MIT License](https://github.com/Rueded/AURALIS/edit/master/LICENSE) 协议开源。欢迎提交 Issue 与 Pull Request 共同完善！
 
 ---
 
