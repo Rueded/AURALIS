@@ -113,23 +113,21 @@ private fun ReactiveGradientBackground(
                 val raw = VisualizerData.amplitude
                 val sens = prefs.getFloat("reactive_sensitivity", 1.5f)
 
-                // 自适应底噪阈值
+                // 自适应底噪：精确追踪当前歌曲的平稳能量
                 movingAverage += 0.05f * (raw - movingAverage)
-                val threshold = movingAverage * 1.05f
+                val threshold = movingAverage * 1.10f // 必须高出底噪 10% 才算“动次打次”
 
-                // 🚨 史诗级修复：将基础倍率下调至 4.5f！
-                // 这样 0.5x 会像微风一样柔和，而 3.0x 会像狂风暴雨！
+                // 🚨 核心修复：放大系数调整为 10.0f，给灵敏度滑块留出巨大空间！
                 val burst = if (raw > threshold && threshold > 0.001f) {
-                    (raw - threshold) * 4.5f * sens
+                    (raw - threshold) * 10.0f * sens
                 } else 0f
 
                 val target = burst.coerceIn(0f, 1f)
 
-                // 爆发与回落算法
                 if (target > displayAmp) {
-                    displayAmp = target
+                    displayAmp = target // 瞬间爆发！
                 } else {
-                    displayAmp *= 0.85f
+                    displayAmp *= 0.88f // Q弹回落！
                     if (displayAmp < 0.01f) displayAmp = 0f
                 }
                 delay(16L)
@@ -159,7 +157,7 @@ private fun ReactiveGradientBackground(
 
         val rad1 = Math.toRadians(phase1.toDouble()); val rad2 = Math.toRadians(phase2.toDouble())
 
-        val leftRadius = size.maxDimension * (0.40f + displayAmp * 0.15f)
+        val leftRadius = size.maxDimension * (0.40f + displayAmp * 0.18f)
         val alphaL = 0.20f + displayAmp * 0.35f
         val leftX = size.width * 0.25f + kotlin.math.sin(rad1).toFloat() * size.width * 0.15f
         val leftY = size.height * 0.3f + kotlin.math.cos(rad1 * 0.8).toFloat() * size.height * 0.1f
@@ -168,7 +166,7 @@ private fun ReactiveGradientBackground(
             radius = leftRadius, center = androidx.compose.ui.geometry.Offset(leftX, leftY)
         )
 
-        val rightRadius = size.maxDimension * (0.45f + displayAmp * 0.20f)
+        val rightRadius = size.maxDimension * (0.45f + displayAmp * 0.22f)
         val alphaR = 0.20f + displayAmp * 0.35f
         val rightX = size.width * 0.75f + kotlin.math.cos(rad2).toFloat() * size.width * 0.15f
         val rightY = size.height * 0.6f + kotlin.math.sin(rad2 * 1.1).toFloat() * size.height * 0.1f
