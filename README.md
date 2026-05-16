@@ -2,7 +2,7 @@
 <div align="center">
   <h1>🌌 Auralis (音澜)</h1>
   <p><b>发烧级本地高保真无损音乐播放器 · 基于 Kotlin & Jetpack Compose</b></p>
-  <p><i>彻底接管“解码”到“输出”全链路，释放本地无损音乐最真实的生命力</i></p>
+  <p>彻底接管“解码”到“输出”全链路，释放本地无损音乐最真实的生命力</p>
 
 [![Platform](https://img.shields.io/badge/Platform-Android_8.0+-3DDC84?style=flat-square&logo=android)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9+-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org)
