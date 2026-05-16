@@ -1,3 +1,4 @@
+
 <div align="center">
   <h1>🌌 Auralis (音澜)</h1>
   <p><b>发烧级本地高保真无损音乐播放器 · 基于 Kotlin & Jetpack Compose</b></p>
@@ -51,38 +52,65 @@
 ---
 
 ## 🛠️ 技术栈 (Tech Stack)
-UI 框架: Jetpack Compose 100% 纯声明式构建 (Material Design 3)
-内核驱动: AndroidX Media3 (ExoPlayer 内核)
-音频解析: MediaExtractor, MediaMetadataRetriever, jaudiotagger
-异步并发: Kotlin Coroutines & Flow (自适应切换 Dispatchers.IO / Main)
-本地存储: Room Database (基于破坏性迁移策略升级多张关联表)
-网络请求: OkHttp3 (15s 超时拉长防断链路) & Gson
 
-🚀 核心架构亮点 (Architecture Highlights)
-Auralis 重点解决了传统 Android 音视频开发中长期存在的两大痛点：底层数据源污染 与 高频异步读写竞争。
-1. 零 IO 浪费的“单次扫描行为”
+```mermaid
+graph TD
+    A[UI 表现层: Jetpack Compose] --> B[内核驱动层: AndroidX Media3 ExoPlayer]
+    B --> C[数据持久层: Room Database]
+    A --> D[数据并发控制: Coroutines & Flow]
+    B --> E[音频解析层: MediaExtractor / jaudiotagger]
+    D --> F[网络异步层: OkHttp3 & Gson]
+
+```
+
+* **UI 框架**: Jetpack Compose 100% 纯声明式构建 (Material Design 3)
+* **内核驱动**: AndroidX Media3 (ExoPlayer 内核)
+* **音频解析**: `MediaExtractor`, `MediaMetadataRetriever`, `jaudiotagger`
+* **异步并发**: Kotlin Coroutines & Flow (自适应切换 `Dispatchers.IO` / `Main`)
+* **本地存储**: Room Database (基于破坏性迁移策略升级多张关联表)
+* **网络请求**: OkHttp3 (15s 超时拉长防断链路) & Gson
+
+---
+
+## 🚀 核心架构亮点 (Architecture Highlights)
+
+Auralis 重点解决了传统 Android 音视频开发中长期存在的两大痛点：**底层数据源污染** 与 **高频异步读写竞争**。
+
+### 1. 零 IO 浪费的“单次扫描行为”
+
 在传统架构中，读取音频规格、提取缩略图、查询本地数据库往往会导致多次磁盘 IO。Auralis 在深度扫描过程中：
-仅触发一次物理 IO 操作，利用 jaudiotagger 与 MediaExtractor 异步泵出物理位深、真实采样率与内嵌 Meta 标签。
-扫描数据直接通过 Room 进行冲突忽略 (OnConflictStrategy.IGNORE) 入库，从源头拯救系统索引被污染的“真值”。
-2. 协程作用域斩杀机制防御时序竞争
-用户高频切歌或快速滚动列表时，会瞬间并发数十个网络封面/歌词查询请求。
-Auralis 充分利用了 Compose LaunchedEffect 的 Key 值联动机制，一旦 audioPath 变更，上一个未完成的独立请求赛道将被瞬间强行 cancel 斩杀。
-核心写入逻辑配备 Mutex 互斥锁，即使网络回流存在延迟，也严格拒绝脏数据和串台歌词写入当前物理磁盘。
-📂 界面预览与交互隐喻
-💡 Tip: 建议克隆本项目后，将实际运行截图替换至下方占位符中。
-🌌 动态星云耀斑播放器
-📝 毛玻璃微动歌词轴
-🎛️ 网格化配色设置页
-🧹 智能曲库查重清理
 
-🎹 发烧级隐藏玩法：PC 有线音箱推流模式
-Auralis 内部集成了基于低延迟 AudioTrack (PERFORMANCE_MODE_LOW_LATENCY) 构建的 Socket 接收端，可将手机转化为 PC 的有线无损发烧外置声卡：
-进入 App 「设置」 $\rightarrow$ 打开 PC 有线音箱模式（服务将自动探测并监听 8899 端口）。
-将手机通过数据线连接至电脑，确保 USB 调试 已激活。
-在电脑端控制台运行 adb 逆向端口转发命令：
-Bash
+* 仅触发**一次物理 IO 操作**，利用 `jaudiotagger` 与 `MediaExtractor` 异步泵出物理位深、真实采样率与内嵌 Meta 标签。
+* 扫描数据直接通过 Room 进行冲突忽略 (`OnConflictStrategy.IGNORE`) 入库，从源头拯救系统索引被污染的“真值”。
+
+### 2. 协程作用域斩杀机制防御时序竞争
+
+用户高频切歌或快速滚动列表时，会瞬间并发数十个网络封面/歌词查询请求。
+
+* Auralis 充分利用了 Compose `LaunchedEffect` 的 Key 值联动机制，一旦 `audioPath` 变更，上一个未完成的独立请求赛道将被**瞬间强行 cancel 斩杀**。
+* 核心写入逻辑配备 `Mutex` 互斥锁，即使网络回流存在延迟，也严格拒绝脏数据和串台歌词写入当前物理磁盘。
+
+---
+
+## 🎹 发烧级隐藏玩法：PC 有线音箱推流模式
+
+Auralis 内部集成了基于低延迟 `AudioTrack (PERFORMANCE_MODE_LOW_LATENCY)` 构建的 Socket 接收端，可将手机转化为 PC 的有线无损发烧外置声卡：
+
+1. 进入 App 「设置」 $\rightarrow$ 打开 **PC 有线音箱模式**（服务将自动探测并监听 `8899` 端口）。
+2. 将手机通过数据线连接至电脑，确保 **USB 调试** 已激活。
+3. 在电脑端控制台运行 adb 逆向端口转发命令：
+```bash
 adb reverse tcp:8899 tcp:8899
 
-电脑端声卡推流服务开启后，音频流将通过有线链路以 44.1kHz/16bit 双声道 PCM 无损泵入手机，实现几乎零延迟的推流同步体验。
-📜 许可证 (License)
-本项目采用 GNU GPLv3 许可证开源，一切底层改动及优化必须保持开源。
+```
+
+
+4. 电脑端声卡推流服务开启后，音频流将通过有线链路以 44.1kHz/16bit 双声道 PCM 无损泵入手机，实现几乎零延迟的推流同步体验。
+
+---
+
+## 📜 许可证 (License)
+
+本项目采用 [GNU GPLv3](https://github.com/Rueded/AURALIS/edit/master/LISENCE) 许可证开源，一切底层改动及优化必须保持开源。
+
+```
