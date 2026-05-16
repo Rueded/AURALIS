@@ -1,6 +1,6 @@
 
 <div align="center">
-  <h1>🌌 A U R A L I S 音澜)</h1>
+  <h1>🌌 A U R A L I S 音澜</h1>
   <p><b>发烧级本地高保真无损音乐播放器 · 基于 Kotlin & Jetpack Compose</b></p>
   <p>彻底接管“解码”到“输出”全链路，释放本地无损音乐最真实的生命力</p>
 
