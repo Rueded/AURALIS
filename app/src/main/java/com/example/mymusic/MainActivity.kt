@@ -1407,7 +1407,26 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 },
                 onBatchImportLrc = { batchLrcPicker.launch(arrayOf("*/*")) },
-                onShowSleepTimer = { showSleepTimerDialog = true }
+                onShowSleepTimer = { showSleepTimerDialog = true },
+                // 👇 把丢失的智能查重大脑补回来！
+                onFindDuplicates = {
+                    scope.launch(Dispatchers.Default) {
+                        // 智能查重逻辑：按 “歌名 + 歌手” 精准归类，忽略大小写和空格！
+                        val duplicates = allSongs.groupBy { "${it.title.trim().lowercase()}_${it.artist.trim().lowercase()}" }
+                            .filter { it.value.size > 1 }
+                            .values.toList()
+
+                        withContext(Dispatchers.Main) {
+                            if (duplicates.isNotEmpty()) {
+                                duplicatesList = duplicates
+                                showDuplicateDialog = true
+                                showSettingsScreen = false // 关掉设置页，优雅地弹出查重界面
+                            } else {
+                                Toast.makeText(context, "太棒了！你的曲库非常干净，没有重复歌曲 ✨", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
             )
             BackHandler { showSettingsScreen = false }
         }

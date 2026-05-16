@@ -53,7 +53,7 @@ fun SettingsScreen(
     pcServerIp: String, onPcServerIpChange: (String) -> Unit,
     savedFolderUriStr: String?, onPickFolder: () -> Unit,
     allowedFolders: Set<String>, onFolderAdded: (String) -> Unit, onFolderRemoved: (String) -> Unit,
-    onRescanLibrary: () -> Unit, onBatchImportLrc: () -> Unit, onShowSleepTimer: () -> Unit
+    onRescanLibrary: () -> Unit, onBatchImportLrc: () -> Unit, onShowSleepTimer: () -> Unit, onFindDuplicates: () -> Unit
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -251,6 +251,14 @@ fun SettingsScreen(
                 SettingsClickRow(icon = Icons.Outlined.CreateNewFolder, iconTint = libraryColor, title = "添加扫描路径", subtitle = "指定文件夹，不再扫描全盘", onClick = { folderPickerLauncher.launch(null) })
                 SettingsDivider()
                 SettingsClickRow(icon = Icons.Outlined.Refresh, iconTint = libraryColor, title = "重新深度扫描", subtitle = "清空缓存，重新解析所有歌曲", onClick = onRescanLibrary)
+                SettingsDivider()
+                SettingsClickRow(
+                    icon = Icons.Outlined.ContentCopy,
+                    iconTint = libraryColor,
+                    title = "清理重复歌曲",
+                    subtitle = "智能扫描并清理相同音轨",
+                    onClick = onFindDuplicates
+                )
             }
 
             // ── 四 连接与同步 ──────────────────────────────────────────────────
