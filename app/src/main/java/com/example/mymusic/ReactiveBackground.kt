@@ -14,11 +14,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform // 🚨 引入矩阵变换魔法
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -27,8 +27,8 @@ enum class BackgroundMode(val label: String) {
     BREATHING("呼吸律动"),
     FLUID("流体漫游"),
     HORIZON("深邃地平线"),
-    CLASSIC_EQ("极细 EQ"),
-    STARDUST("星云耀斑")
+    CLASSIC_EQ("极细 EQ (Pro)"),
+    STARDUST("星云耀斑 (Flare)")
 }
 
 @Composable
@@ -79,7 +79,7 @@ private fun rememberAudioAmplitude(isPlaying: Boolean): Float {
 }
 
 // ==========================================
-// ✨ 真·星云耀斑 (带独立自转引擎)
+// ✨ 真·星云耀斑 (修复了鬼畜摇摆)
 // ==========================================
 private data class StarParticle(
     val xRatio: Float,
@@ -87,10 +87,12 @@ private data class StarParticle(
     val speed: Float,
     val baseSize: Float,
     val reactSensitivity: Float,
-    val hasFlare: Boolean,
-    val isSuperStar: Boolean,
-    val initialAngle: Float, // 🚨 新增：出生时的随机角度 (0-360)
-    val rotationSpeed: Float // 🚨 新增：自转速度 (有正有负)
+    val flareType: Int,
+    val initialAngle: Float,
+    val rotationSpeed: Float,
+    val rayProportions: FloatArray,
+    val twinkleSpeed: Float,
+    val driftSpeed: Float
 )
 
 @Composable
@@ -100,18 +102,48 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
     val phase by infiniteTransition.animateFloat(0f, 1000f, infiniteRepeatable(tween(30000, easing = LinearEasing)), label = "phase")
 
     val particles = remember {
-        List(120) {
+        List(100) {
+            val rand = Math.random()
+            val type = when {
+                rand > 0.75 -> 8
+                rand > 0.45 -> 6
+                rand > 0.15 -> 4
+                else -> 0
+            }
+
+            val lineCount = type / 2
+            val proportions = FloatArray(lineCount)
+
+            when (type) {
+                8 -> {
+                    proportions[0] = 1.0f
+                    proportions[1] = 0.45f + Math.random().toFloat() * 0.15f
+                    proportions[2] = 0.80f + Math.random().toFloat() * 0.15f
+                    proportions[3] = 0.45f + Math.random().toFloat() * 0.15f
+                }
+                6 -> {
+                    proportions[0] = 1.0f
+                    proportions[1] = 0.6f + Math.random().toFloat() * 0.3f
+                    proportions[2] = 0.6f + Math.random().toFloat() * 0.3f
+                }
+                4 -> {
+                    proportions[0] = 1.0f
+                    proportions[1] = 0.6f + Math.random().toFloat() * 0.35f
+                }
+            }
+
             StarParticle(
                 xRatio = Math.random().toFloat(),
                 yOffset = Math.random().toFloat(),
-                speed = 0.05f + Math.random().toFloat() * 0.25f,
+                speed = 0.05f + Math.random().toFloat() * 0.15f, // 🚨 让整体上升速度变得更缓慢深邃
                 baseSize = 0.5f + Math.random().toFloat() * 1.2f,
-                reactSensitivity = 0.5f + Math.random().toFloat() * 2.5f,
-                hasFlare = Math.random() > 0.40,
-                isSuperStar = Math.random() > 0.85,
-                // 💡 随机角度 (不再全是竖直的十字)，以及随机自转速度！
+                reactSensitivity = if (type == 8) 1.2f + Math.random().toFloat() * 1.5f else 0.5f + Math.random().toFloat() * 1.5f,
+                flareType = type,
                 initialAngle = (Math.random() * 360).toFloat(),
-                rotationSpeed = ((Math.random() - 0.5f) * 12f).toFloat()
+                rotationSpeed = ((Math.random() - 0.5f) * 8f).toFloat(), // 🚨 自转也变得克制一点
+                rayProportions = proportions,
+                twinkleSpeed = 0.5f + Math.random().toFloat() * 1.5f,
+                driftSpeed = 0.05f + Math.random().toFloat() * 0.5f  // 🚨 漂浮频率大幅度降低
             )
         }
     }
@@ -120,51 +152,61 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
         drawRect(dominantColor.copy(alpha = 0.06f))
 
         particles.forEach { star ->
-            val yPos = size.height - ((phase * star.speed * 8f + star.yOffset * size.height) % size.height)
-            val xPos = (star.xRatio * size.width) + sin(yPos * 0.003f + star.yOffset * 100f) * 20f
+            val twinkle = (sin(phase * star.twinkleSpeed + star.xRatio * 100f) * 0.5f + 0.5f).toFloat()
 
-            val react = displayAmp * star.reactSensitivity
+            val yPos = size.height - ((phase * star.speed * 8f + star.yOffset * size.height) % size.height)
+
+            // 🚨 核心去鬼畜修复：把 35f 的摆幅硬核削减到极其微弱的 3f！只剩下极度缓慢微弱的悬浮感
+            val xPos = (star.xRatio * size.width) + sin(phase * star.driftSpeed + star.yOffset * 50f) * 1f
+
+            val audioReact = displayAmp * star.reactSensitivity
+            val react = audioReact + (twinkle * 0.25f)
+
             val pRadius = star.baseSize + (react * 0.8f)
-            val baseAlpha = 0.15f + (react * 1.5f)
+            val baseAlpha = 0.15f + (react * 1.2f)
             val fadeOut = (yPos / size.height).coerceIn(0f, 1f)
             val finalAlpha = (baseAlpha * fadeOut).coerceIn(0f, 1f)
 
             val centerOffset = Offset(xPos, yPos)
 
-            // 1. 散景微光
-            if (react > 0.1f) {
+            if (react > 0.05f) {
                 val glowRadius = pRadius * 3.5f
-                drawCircle(
-                    brush = Brush.radialGradient(listOf(dominantColor.copy(alpha = finalAlpha * 0.4f), Color.Transparent), center = centerOffset, radius = glowRadius),
-                    radius = glowRadius, center = centerOffset
-                )
+                drawCircle(Brush.radialGradient(listOf(dominantColor.copy(alpha = finalAlpha * 0.35f), Color.Transparent), center = centerOffset, radius = glowRadius), radius = glowRadius, center = centerOffset)
             }
 
-            // 2. 实心星核
             drawCircle(color = dominantColor.copy(alpha = finalAlpha), radius = pRadius, center = centerOffset)
 
-            // 3. 🚨 会旋转的光学耀斑！
-            if (star.hasFlare && react > 0.15f) {
-                // 计算当前这颗星星的旋转角度 (初始角度 + 随着时间推移的自转)
-                val currentRotation = star.initialAngle + phase * star.rotationSpeed
+            if (star.flareType > 0) {
+                val baseFlareLen = star.baseSize * (if (star.flareType == 8) 12f else 8f) * (react + 0.3f)
+                val flareStroke = 0.6f + (react * 0.6f)
 
-                // 利用 drawBehind 的 withTransform 魔法，将这颗星星的光芒倾斜！
-                withTransform({
-                    rotate(degrees = currentRotation, pivot = centerOffset)
-                }) {
-                    val flareLen = star.baseSize * 15f * react
-                    val flareStroke = 0.8f + (react * 0.5f)
+                val lineCount = star.flareType / 2
+                val angleStep = 180f / lineCount
 
-                    // 画出来的虽然还是十字，但是整个画布被旋转了，所以看起来就是倾斜的星芒！
-                    drawLine(color = dominantColor.copy(alpha = finalAlpha * 0.8f), start = Offset(xPos - flareLen, yPos), end = Offset(xPos + flareLen, yPos), strokeWidth = flareStroke)
-                    drawLine(color = dominantColor.copy(alpha = finalAlpha * 0.8f), start = Offset(xPos, yPos - flareLen), end = Offset(xPos, yPos + flareLen), strokeWidth = flareStroke)
+                for (i in 0 until lineCount) {
+                    val currentAngle = star.initialAngle + phase * star.rotationSpeed + (i * angleStep)
+                    val rad = Math.toRadians(currentAngle.toDouble()).toFloat()
 
-                    if (star.isSuperStar) {
-                        val subFlare = flareLen * 0.4f
-                        val subStroke = 0.5f
-                        drawLine(color = dominantColor.copy(alpha = finalAlpha * 0.5f), start = Offset(xPos - subFlare, yPos - subFlare), end = Offset(xPos + subFlare, yPos + subFlare), strokeWidth = subStroke)
-                        drawLine(color = dominantColor.copy(alpha = finalAlpha * 0.5f), start = Offset(xPos - subFlare, yPos + subFlare), end = Offset(xPos + subFlare, yPos - subFlare), strokeWidth = subStroke)
-                    }
+                    val prop = star.rayProportions[i]
+                    val actualLen = baseFlareLen * prop
+                    val actualAlpha = finalAlpha * (0.5f + 0.5f * prop)
+                    val actualStroke = flareStroke * (0.6f + 0.4f * prop)
+
+                    val dx = cos(rad) * actualLen
+                    val dy = sin(rad) * actualLen
+
+                    val startOffset = Offset(xPos - dx, yPos - dy)
+                    val endOffset = Offset(xPos + dx, yPos + dy)
+
+                    val centerColor = dominantColor.copy(alpha = actualAlpha.coerceIn(0f, 1f))
+                    val flareBrush = Brush.linearGradient(
+                        colors = listOf(Color.Transparent, centerColor, Color.Transparent),
+                        start = startOffset,
+                        end = endOffset
+                    )
+
+                    drawLine(brush = flareBrush, start = startOffset, end = endOffset, strokeWidth = actualStroke * 2.5f, cap = StrokeCap.Butt)
+                    drawLine(brush = flareBrush, start = startOffset, end = endOffset, strokeWidth = actualStroke * 0.5f, cap = StrokeCap.Butt)
                 }
             }
         }
@@ -173,7 +215,7 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
 
 
 // ==========================================
-// 📊 顶级极细 EQ (原有完美效果保持不变)
+// 📊 顶级极细 EQ
 // ==========================================
 @Composable
 private fun ClassicLineEqBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
@@ -206,7 +248,7 @@ private fun ClassicLineEqBackground(dominantColor: Color, surface: Color, isPlay
 }
 
 // ==========================================
-// 🌌 Premium Horizon V2 (原有效果保持不变)
+// 🌌 Premium Horizon V2
 // ==========================================
 @Composable
 private fun PremiumHorizonBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
@@ -236,7 +278,7 @@ private fun PremiumHorizonBackground(dominantColor: Color, surface: Color, isPla
 }
 
 // ==========================================
-// 🍎 Apple Fluid (原有效果保持不变)
+// 🍎 Apple Fluid
 // ==========================================
 @Composable
 private fun AppleFluidBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
@@ -259,12 +301,12 @@ private fun AppleFluidBackground(dominantColor: Color, surface: Color, isPlaying
         val leftRadius = size.maxDimension * (0.40f + displayAmp * 0.18f)
         val alphaL = 0.20f + displayAmp * 0.35f
         val leftX = size.width * 0.25f + sin(rad1).toFloat() * size.width * 0.15f
-        val leftY = size.height * 0.3f + kotlin.math.cos(rad1 * 0.8).toFloat() * size.height * 0.1f
+        val leftY = size.height * 0.3f + cos(rad1 * 0.8).toFloat() * size.height * 0.1f
         drawCircle(Brush.radialGradient(listOf(colorLeft.copy(alpha = alphaL), Color.Transparent), center = Offset(leftX, leftY), radius = leftRadius), leftRadius, Offset(leftX, leftY))
 
         val rightRadius = size.maxDimension * (0.45f + displayAmp * 0.22f)
         val alphaR = 0.20f + displayAmp * 0.35f
-        val rightX = size.width * 0.75f + kotlin.math.cos(rad2).toFloat() * size.width * 0.15f
+        val rightX = size.width * 0.75f + cos(rad2).toFloat() * size.width * 0.15f
         val rightY = size.height * 0.6f + sin(rad2 * 1.1).toFloat() * size.height * 0.1f
         drawCircle(Brush.radialGradient(listOf(colorRight.copy(alpha = alphaR), Color.Transparent), center = Offset(rightX, rightY), radius = rightRadius), rightRadius, Offset(rightX, rightY))
     }) { content() }
