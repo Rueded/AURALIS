@@ -1779,7 +1779,12 @@ fun FullScreenPlayer(
         var showEqDialog by remember { mutableStateOf(false) }
         var showSpeedMenu by remember { mutableStateOf(false) }
 
-        var lyricsFontSize by rememberSaveable { mutableFloatStateOf(20f) }
+        var lyricsFontSize by remember { mutableFloatStateOf(prefs.getFloat("lyrics_font_size", 20f)) }
+
+        // 👇 只要哥哥点击了 A- 或 A+ 改变了大小，就立刻写进本地文件里永久保存！
+        LaunchedEffect(lyricsFontSize) {
+            prefs.edit().putFloat("lyrics_font_size", lyricsFontSize).apply()
+        }
         var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
         var abLoopStart by remember { mutableLongStateOf(-1L) }
         var abLoopEnd by remember { mutableLongStateOf(-1L) }
