@@ -1,5 +1,5 @@
-markdown_content = """<div align="center">
-  <h1>✨ AURALIS ✨</h1>
+<div align="center">
+  <h1>🌌 AURALIS </h1>
   <p><b>发烧级音质 · 流体美学 · 跨屏互联</b></p>
   <p><i>重塑本地音乐体验的纯粹之作</i></p>
 </div>
