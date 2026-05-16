@@ -1,4 +1,3 @@
-<div align="center">
 # 🌌 AURALIS 
 
 **为极致发烧而生 · 纯粹、深邃的本地音乐播放器**
