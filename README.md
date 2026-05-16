@@ -111,4 +111,4 @@ adb reverse tcp:8899 tcp:8899
 
 ## 📜 许可证 (License)
 
-本项目采用 [GNU GPLv3](https://github.com/Rueded/AURALIS/master/LISENCE) 许可证开源，一切底层改动及优化必须保持开源。
+本项目采用 [GNU GPLv3](https://github.com/Rueded/AURALIS/blob/master/LICENSE) 许可证开源，一切底层改动及优化必须保持开源。
