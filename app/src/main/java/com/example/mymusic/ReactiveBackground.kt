@@ -52,7 +52,7 @@ private fun BreathingGradientBackground(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "breathing")
 
-    // 让动画一直跑，算出呼吸的 Alpha 和游走的 X、Y
+    // 让后台产生完美的循环动画数值
     val targetBreatheAlpha = infiniteTransition.animateFloat(
         initialValue = 0.20f, targetValue = 0.45f,
         animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "alpha"
@@ -66,19 +66,17 @@ private fun BreathingGradientBackground(
         animationSpec = infiniteRepeatable(tween(6500, easing = LinearEasing), RepeatMode.Reverse), label = "y"
     )
 
-    // 暂停时，非常平滑地定格在中心点和固定亮度
-    val currentAlpha by animateFloatAsState(
-        targetValue = if (isPlaying) targetBreatheAlpha.value else 0.20f,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "alphaState"
+    // 👇 【神级修复】：用一个统一的进度条来控制播放/暂停的过渡，彻底解决画面冻结！
+    val playFraction by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(1500, easing = FastOutSlowInEasing),
+        label = "playFraction"
     )
-    val currentOffsetX by animateFloatAsState(
-        targetValue = if (isPlaying) targetOffsetX.value else 0.5f,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "xState"
-    )
-    val currentOffsetY by animateFloatAsState(
-        targetValue = if (isPlaying) targetOffsetY.value else 0.5f,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "yState"
-    )
+
+    // 通过数学插值计算最终状态
+    val currentAlpha = 0.20f + (targetBreatheAlpha.value - 0.20f) * playFraction
+    val currentOffsetX = 0.5f + (targetOffsetX.value - 0.5f) * playFraction
+    val currentOffsetY = 0.5f + (targetOffsetY.value - 0.5f) * playFraction
 
     Box(modifier = modifier.drawBehind {
         val centerOffset = androidx.compose.ui.geometry.Offset(size.width * currentOffsetX, size.height * currentOffsetY)
@@ -105,12 +103,11 @@ private fun ReactiveGradientBackground(
 ) {
     var currentAmp by remember { mutableStateOf(0f) }
 
-    // 直接抛弃系统的 Visualizer，读我们自己写的拦截器！
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (isActive) {
                 currentAmp = VisualizerData.amplitude
-                delay(16L) // 60fps 帧率
+                delay(16L) // 60fps 刷新率
             }
         } else {
             currentAmp = 0f

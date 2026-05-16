@@ -36,7 +36,6 @@ class PlaybackService : MediaSessionService() {
     companion object {
         var audioSessionId: Int = 0
         var instance: PlaybackService? = null
-
         private val _bitPerfectState = MutableStateFlow(false)
         val bitPerfectState: StateFlow<Boolean> = _bitPerfectState.asStateFlow()
     }
@@ -51,12 +50,12 @@ class PlaybackService : MediaSessionService() {
         instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-        // 👇 云糯修复：在这里挂载拦截器，并且强开 32-bit Float
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
                 return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(AuralisVisualizerProcessor())) // 👈 拦截器！
-                    .setEnableFloatOutput(true) // 32bit 浮点，保护动态范围
+                    .setAudioProcessors(arrayOf(AuralisVisualizerProcessor()))
+                    // 👇 【致命修复点】：必须是 false！否则系统 EQ 绝对用不了！！！
+                    .setEnableFloatOutput(false)
                     .build()
             }
         }
@@ -81,7 +80,6 @@ class PlaybackService : MediaSessionService() {
         val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
         val isBitPerfectEnabled = prefs.getBoolean("enable_bit_perfect", false)
 
-        // 👇 云糯修复：必须强行设为 false！否则 EQ 和音乐响应彻底完蛋！
         applyOffloadPreference(builtPlayer, enableOffload = false)
         applyUsbBitPerfectSetting(isBitPerfectEnabled)
 
@@ -122,8 +120,6 @@ class PlaybackService : MediaSessionService() {
     fun applyUsbBitPerfectSetting(enable: Boolean, sampleRate: Int = 0, bitDepth: Int = 0) {
         if (Build.VERSION.SDK_INT < 34) return
         if (enable) tryEnableUsbBitPerfect(sampleRate, bitDepth) else tryDisableUsbBitPerfect()
-
-        // 👇 云糯修复：保证切歌或改变设置时，Offload 依然是关闭状态！
         player?.let { applyOffloadPreference(it, enableOffload = false) }
     }
 
@@ -198,9 +194,6 @@ class PlaybackService : MediaSessionService() {
     }
 }
 
-// ==========================================
-// 👇 云糯自研：音频底层拦截器，完美透传 32-bit Float 且不损失音质
-// ==========================================
 object VisualizerData {
     @Volatile var amplitude: Float = 0f
 }
@@ -239,7 +232,8 @@ class AuralisVisualizerProcessor : androidx.media3.common.audio.BaseAudioProcess
 
         if (count > 0) {
             val rms = sqrt(sumSq / count).toFloat()
-            VisualizerData.amplitude = (rms * 2.5f).coerceIn(0f, 1f)
+            // 👇 增加了拦截器的敏感度，让波浪起伏更剧烈！
+            VisualizerData.amplitude = (rms * 4.0f).coerceIn(0f, 1f)
         }
 
         inputBuffer.position(origPos)
