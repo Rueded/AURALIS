@@ -1,6 +1,6 @@
 
 <div align="center">
-  <h1>🌌 Auralis (音澜)</h1>
+  <h1>🌌 A U R A L I S 音澜)</h1>
   <p><b>发烧级本地高保真无损音乐播放器 · 基于 Kotlin & Jetpack Compose</b></p>
   <p>彻底接管“解码”到“输出”全链路，释放本地无损音乐最真实的生命力</p>
 
@@ -15,7 +15,7 @@
 
 ## 💡 项目愿景
 
-**Auralis 音澜** 的使命是打破 Android 底层音频接口的传统妥协。针对原生系统元数据高频错报、AudioFlinger 强制混音 SRC 劣化的通病，项目从零构建了自适应源码直通引擎与双层防抖缓存架构。不仅在技术层面上攻克了高频切歌下的时序竞争乱象，更在视觉层面上将声明式流体美学与硬核发烧工作台完美结合。
+**AURALIS 音澜** 的使命是打破 Android 底层音频接口的传统妥协。针对原生系统元数据高频错报、AudioFlinger 强制混音 SRC 劣化的通病，项目从零构建了自适应源码直通引擎与双层防抖缓存架构。不仅在技术层面上攻克了高频切歌下的时序竞争乱象，更在视觉层面上将声明式流体美学与硬核发烧工作台完美结合。
 
 ---
 
@@ -74,11 +74,11 @@ graph TD
 
 ## 🚀 核心架构亮点 (Architecture Highlights)
 
-Auralis 重点解决了传统 Android 音视频开发中长期存在的两大痛点：**底层数据源污染** 与 **高频异步读写竞争**。
+AURALIS 重点解决了传统 Android 音视频开发中长期存在的两大痛点：**底层数据源污染** 与 **高频异步读写竞争**。
 
 ### 1. 零 IO 浪费的“单次扫描行为”
 
-在传统架构中，读取音频规格、提取缩略图、查询本地数据库往往会导致多次磁盘 IO。Auralis 在深度扫描过程中：
+在传统架构中，读取音频规格、提取缩略图、查询本地数据库往往会导致多次磁盘 IO。AURALIS 在深度扫描过程中：
 
 * 仅触发**一次物理 IO 操作**，利用 `jaudiotagger` 与 `MediaExtractor` 异步泵出物理位深、真实采样率与内嵌 Meta 标签。
 * 扫描数据直接通过 Room 进行冲突忽略 (`OnConflictStrategy.IGNORE`) 入库，从源头拯救系统索引被污染的“真值”。
@@ -87,14 +87,14 @@ Auralis 重点解决了传统 Android 音视频开发中长期存在的两大痛
 
 用户高频切歌或快速滚动列表时，会瞬间并发数十个网络封面/歌词查询请求。
 
-* Auralis 充分利用了 Compose `LaunchedEffect` 的 Key 值联动机制，一旦 `audioPath` 变更，上一个未完成的独立请求赛道将被**瞬间强行 cancel 斩杀**。
+* AURALIS 充分利用了 Compose `LaunchedEffect` 的 Key 值联动机制，一旦 `audioPath` 变更，上一个未完成的独立请求赛道将被**瞬间强行 cancel 斩杀**。
 * 核心写入逻辑配备 `Mutex` 互斥锁，即使网络回流存在延迟，也严格拒绝脏数据和串台歌词写入当前物理磁盘。
 
 ---
 
 ## 🎹 发烧级隐藏玩法：PC 有线音箱推流模式
 
-Auralis 内部集成了基于低延迟 `AudioTrack (PERFORMANCE_MODE_LOW_LATENCY)` 构建的 Socket 接收端，可将手机转化为 PC 的有线无损发烧外置声卡：
+AURALIS 内部集成了基于低延迟 `AudioTrack (PERFORMANCE_MODE_LOW_LATENCY)` 构建的 Socket 接收端，可将手机转化为 PC 的有线无损发烧外置声卡：
 
 1. 进入 App 「设置」 $\rightarrow$ 打开 **PC 有线音箱模式**（服务将自动探测并监听 `8899` 端口）。
 2. 将手机通过数据线连接至电脑，确保 **USB 调试** 已激活。
