@@ -50,15 +50,15 @@ class PlaybackService : MediaSessionService() {
         instance = this
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-        val teeProcessor = androidx.media3.exoplayer.audio.TeeAudioProcessor(AuralisAudioBufferSink())
 
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    // 👇 挂载窃听器，绝不干扰主管道！
-                    .setAudioProcessors(arrayOf(teeProcessor))
-                    .setEnableFloatOutput(false) // 誓死保卫 32-bit 极致音质！
+                // 1. 生成官方原始的主水管（绝对无损的 Float 管道）
+                val originalSink = DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(true) // 👈 誓死保卫 32-bit 极致音质！
                     .build()
+                // 2. 给主水管套上我们的“透明监控外壳”，瞒天过海！
+                return VisualizerInterceptingAudioSink(originalSink)
             }
         }
 
@@ -206,93 +206,117 @@ class PlaybackService : MediaSessionService() {
 object VisualizerData {
     @Volatile var amplitude: Float = 0f
 }
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-// 👇 采用官方的 AudioBufferSink，纯只读模式，绝对不破坏音质和管道！
-class AuralisAudioBufferSink : androidx.media3.exoplayer.audio.TeeAudioProcessor.AudioBufferSink {
+
+// 👇 终极杀招：直接套壳拦截底层 AudioSink！无论 ExoPlayer 怎么屏蔽都不起作用！
+@UnstableApi
+class VisualizerInterceptingAudioSink(private val delegate: androidx.media3.exoplayer.audio.AudioSink) : androidx.media3.exoplayer.audio.AudioSink by delegate {
     private var currentEncoding = androidx.media3.common.C.ENCODING_INVALID
     private var currentChannels = 2
-    private var filterState = 0.0f
-    private val alphaLpf = 0.15f // 完美的低通滤波，保留重低音
+    private var filterStateL = 0.0f
+    private var filterStateR = 0.0f
+    private val alphaLpf = 0.15f // 完美的 100Hz 极限低通滤波
 
-    override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
-        currentEncoding = encoding
-        currentChannels = channelCount
-        filterState = 0.0f
+    override fun configure(inputFormat: androidx.media3.common.Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+        currentEncoding = inputFormat.pcmEncoding
+        currentChannels = inputFormat.channelCount
+        delegate.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
 
-    override fun handleBuffer(buffer: java.nio.ByteBuffer) {
-        // 安全读取模式，使用底层 Native 端序
-        val readBuffer = buffer.asReadOnlyBuffer().order(java.nio.ByteOrder.nativeOrder())
-        var sumSq = 0.0f
-        var count = 0
+    override fun handleBuffer(buffer: java.nio.ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
+        val remaining = buffer.remaining()
+        if (remaining > 0 && currentChannels > 0) {
+            // 🚨 强制使用 LITTLE_ENDIAN，彻底解决内存读反变 NaN 的死机 Bug！
+            val readBuffer = buffer.asReadOnlyBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            var sumSq = 0.0f
+            var count = 0
 
-        try {
-            if (currentEncoding == androidx.media3.common.C.ENCODING_PCM_FLOAT) {
-                val floatBuf = readBuffer.asFloatBuffer()
-                while (floatBuf.remaining() >= currentChannels) {
-                    val l = floatBuf.get()
-                    val r = if (currentChannels > 1) floatBuf.get() else l
-                    if (currentChannels > 2) floatBuf.position(floatBuf.position() + currentChannels - 2)
+            try {
+                when (currentEncoding) {
+                    androidx.media3.common.C.ENCODING_PCM_FLOAT -> {
+                        val floatBuf = readBuffer.asFloatBuffer()
+                        val frames = floatBuf.remaining() / currentChannels
+                        for (i in 0 until frames) {
+                            var l = floatBuf.get()
+                            var r = if (currentChannels > 1) floatBuf.get() else l
+                            if (currentChannels > 2) floatBuf.position(floatBuf.position() + currentChannels - 2)
 
-                    val mono = (l + r) * 0.5f
-                    filterState += alphaLpf * (mono - filterState)
-                    sumSq += filterState * filterState
-                    count++
-                }
-            } else if (currentEncoding == androidx.media3.common.C.ENCODING_PCM_16BIT) {
-                val shortBuf = readBuffer.asShortBuffer()
-                while (shortBuf.remaining() >= currentChannels) {
-                    val l = shortBuf.get() / 32768f
-                    val r = if (currentChannels > 1) shortBuf.get() / 32768f else l
-                    if (currentChannels > 2) shortBuf.position(shortBuf.position() + currentChannels - 2)
+                            if (l.isNaN() || l.isInfinite()) l = 0f
+                            if (r.isNaN() || r.isInfinite()) r = 0f
 
-                    val mono = (l + r) * 0.5f
-                    filterState += alphaLpf * (mono - filterState)
-                    sumSq += filterState * filterState
-                    count++
-                }
-            } else {
-                // 完美兼容 24-bit 和 32-bit 无损！
-                val is24 = currentEncoding == androidx.media3.common.C.ENCODING_PCM_24BIT
-                val bytesPerSample = if (is24) 3 else 4
-                val maxVal = if (is24) 8388608f else 2147483648f
+                            filterStateL += alphaLpf * (l - filterStateL)
+                            filterStateR += alphaLpf * (r - filterStateR)
 
-                while (readBuffer.remaining() >= bytesPerSample * currentChannels) {
-                    var intL = 0
-                    if (is24) {
-                        val b1 = readBuffer.get().toInt() and 0xFF
-                        val b2 = readBuffer.get().toInt() and 0xFF
-                        val b3 = readBuffer.get().toInt()
-                        intL = b1 or (b2 shl 8) or (b3 shl 16)
-                    } else { intL = readBuffer.getInt() }
-
-                    var intR = intL
-                    if (currentChannels > 1) {
-                        if (is24) {
-                            val b1 = readBuffer.get().toInt() and 0xFF
-                            val b2 = readBuffer.get().toInt() and 0xFF
-                            val b3 = readBuffer.get().toInt()
-                            intR = b1 or (b2 shl 8) or (b3 shl 16)
-                        } else { intR = readBuffer.getInt() }
+                            val mono = (filterStateL + filterStateR) * 0.5f
+                            sumSq += mono * mono
+                            count++
+                        }
                     }
+                    androidx.media3.common.C.ENCODING_PCM_16BIT -> {
+                        val shortBuf = readBuffer.asShortBuffer()
+                        val frames = shortBuf.remaining() / currentChannels
+                        for (i in 0 until frames) {
+                            val l = shortBuf.get() / 32768f
+                            val r = if (currentChannels > 1) shortBuf.get() / 32768f else l
+                            if (currentChannels > 2) shortBuf.position(shortBuf.position() + currentChannels - 2)
 
-                    if (currentChannels > 2) readBuffer.position(readBuffer.position() + (currentChannels - 2) * bytesPerSample)
+                            filterStateL += alphaLpf * (l - filterStateL)
+                            filterStateR += alphaLpf * (r - filterStateR)
 
-                    val mono = ((intL / maxVal) + (intR / maxVal)) * 0.5f
-                    filterState += alphaLpf * (mono - filterState)
-                    sumSq += filterState * filterState
-                    count++
+                            val mono = (filterStateL + filterStateR) * 0.5f
+                            sumSq += mono * mono
+                            count++
+                        }
+                    }
+                    androidx.media3.common.C.ENCODING_PCM_24BIT,
+                    androidx.media3.common.C.ENCODING_PCM_32BIT -> {
+                        val is24 = currentEncoding == androidx.media3.common.C.ENCODING_PCM_24BIT
+                        val bytesPerSample = if (is24) 3 else 4
+                        val maxVal = if (is24) 8388608f else 2147483648f
+                        val frames = readBuffer.remaining() / (bytesPerSample * currentChannels)
+
+                        for (i in 0 until frames) {
+                            var intL = 0; var intR = 0
+                            if (is24) {
+                                val b1 = readBuffer.get().toInt() and 0xFF
+                                val b2 = readBuffer.get().toInt() and 0xFF
+                                val b3 = readBuffer.get().toInt()
+                                intL = b1 or (b2 shl 8) or (b3 shl 16)
+                                if (currentChannels > 1) {
+                                    val b1R = readBuffer.get().toInt() and 0xFF
+                                    val b2R = readBuffer.get().toInt() and 0xFF
+                                    val b3R = readBuffer.get().toInt()
+                                    intR = b1R or (b2R shl 8) or (b3R shl 16)
+                                } else intR = intL
+                            } else {
+                                intL = readBuffer.getInt()
+                                intR = if (currentChannels > 1) readBuffer.getInt() else intL
+                            }
+                            if (currentChannels > 2) readBuffer.position(readBuffer.position() + (currentChannels - 2) * bytesPerSample)
+
+                            val sampleL = intL / maxVal
+                            val sampleR = intR / maxVal
+
+                            filterStateL += alphaLpf * (sampleL - filterStateL)
+                            filterStateR += alphaLpf * (sampleR - filterStateR)
+
+                            val mono = (filterStateL + filterStateR) * 0.5f
+                            sumSq += mono * mono
+                            count++
+                        }
+                    }
                 }
-            }
 
-            if (count > 0) {
-                val rms = kotlin.math.sqrt(sumSq / count).toFloat()
-                if (!rms.isNaN() && !rms.isInfinite()) {
-                    VisualizerData.amplitude = rms // 成功抓取！
+                if (count > 0) {
+                    val rms = kotlin.math.sqrt(sumSq / count).toFloat()
+                    if (!rms.isNaN() && !rms.isInfinite()) {
+                        VisualizerData.amplitude = rms // 完美抓取！
+                    }
                 }
+            } catch (e: Exception) {
+                // 静默护航，绝不阻碍音乐播放
             }
-        } catch (e: Exception) {
-            // 静默保护，就算异常也绝对不卡死播放器！
         }
+        // 👇 数据原封不动交给真正的主水管，100% 绝对无损！
+        return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 }

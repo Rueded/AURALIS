@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.horizontalScroll
 
 // ── 设置项数据模型 ────────────────────────────────────────────────────────────
 private data class SettingToggleItem(
@@ -148,14 +149,24 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Text("全屏播放器背景", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // 👇 加上 horizontalScroll，滑动丝滑如德芙！
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
                         BackgroundMode.entries.forEach { mode ->
-                            FilterChip(selected = bgMode == mode, onClick = { bgMode = mode; prefs.edit().putString("bg_mode", mode.name).apply() }, label = { Text(mode.label, fontSize = 12.sp) })
+                            FilterChip(
+                                selected = bgMode == mode,
+                                onClick = { bgMode = mode; prefs.edit().putString("bg_mode", mode.name).apply() },
+                                label = { Text(mode.label, fontSize = 12.sp) }
+                            )
                         }
                     }
 
                     // 👇 云糯新增：专属于“音频响应”的灵敏度滑块！
-                    AnimatedVisibility(visible = bgMode == BackgroundMode.REACTIVE) {
+                    AnimatedVisibility(visible = bgMode == BackgroundMode.FLUID || bgMode == BackgroundMode.HORIZON || bgMode == BackgroundMode.CLASSIC_EQ || bgMode == BackgroundMode.STARDUST ) {
                         Column(modifier = Modifier.padding(top = 16.dp)) {
                             var sensitivity by remember { mutableFloatStateOf(prefs.getFloat("reactive_sensitivity", 1.5f)) }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
