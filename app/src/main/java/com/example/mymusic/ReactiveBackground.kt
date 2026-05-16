@@ -1,11 +1,8 @@
 package com.example.mymusic
 
-import android.media.audiofx.Visualizer
-import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,52 +13,35 @@ import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-private const val TAG = "ReactiveBackground"
-
 enum class BackgroundMode(val label: String) {
     STATIC("静态渐变"),
     BREATHING("呼吸律动"),
     REACTIVE("音频响应")
 }
 
-// ── 对外主组件 ─────────────────────────────────────────────────────────────────
 @Composable
 fun ReactiveBackground(
     dominantColor: Color,
     mode: BackgroundMode,
     isPlaying: Boolean,
-    audioSessionId: Int,
+    audioSessionId: Int, // 废弃参数保留防报错
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val surface = MaterialTheme.colorScheme.surface
-
     when (mode) {
         BackgroundMode.STATIC    -> StaticGradientBackground(dominantColor, surface, modifier, content)
         BackgroundMode.BREATHING -> BreathingGradientBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.REACTIVE  -> ReactiveGradientBackground(dominantColor, surface, isPlaying, audioSessionId, modifier, content)
+        BackgroundMode.REACTIVE  -> ReactiveGradientBackground(dominantColor, surface, isPlaying, modifier, content)
     }
 }
 
-// ── 静态渐变 ──────────────────────────────────────────────────────────────────
 @Composable
-private fun StaticGradientBackground(
-    dominantColor: Color,
-    surface: Color,
-    modifier: Modifier,
-    content: @Composable () -> Unit
-) {
-    val brush = Brush.verticalGradient(
-        listOf(
-            dominantColor.copy(alpha = 0.55f),
-            dominantColor.copy(alpha = 0.15f),
-            surface
-        )
-    )
+private fun StaticGradientBackground(dominantColor: Color, surface: Color, modifier: Modifier, content: @Composable () -> Unit) {
+    val brush = Brush.verticalGradient(listOf(dominantColor.copy(alpha = 0.55f), dominantColor.copy(alpha = 0.15f), surface))
     Box(modifier = modifier.background(brush)) { content() }
 }
 
-// ── 呼吸渐变：alpha 周期脉动，无需权限 ───────────────────────────────────────
 @Composable
 private fun BreathingGradientBackground(
     dominantColor: Color,
@@ -72,57 +52,65 @@ private fun BreathingGradientBackground(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "breathing")
 
-    // 1. 让动画永远在后台呼吸运转
-    val breatheAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.35f, targetValue = 0.70f,
-        animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "breatheAlpha"
+    // 让动画一直跑，算出呼吸的 Alpha 和游走的 X、Y
+    val targetBreatheAlpha = infiniteTransition.animateFloat(
+        initialValue = 0.20f, targetValue = 0.45f,
+        animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "alpha"
     )
-    val breatheScale by infiniteTransition.animateFloat(
-        initialValue = 0.70f, targetValue = 1.00f,
-        animationSpec = infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "breatheScale"
+    val targetOffsetX = infiniteTransition.animateFloat(
+        initialValue = 0.2f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(8500, easing = LinearEasing), RepeatMode.Reverse), label = "x"
+    )
+    val targetOffsetY = infiniteTransition.animateFloat(
+        initialValue = 0.1f, targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(6500, easing = LinearEasing), RepeatMode.Reverse), label = "y"
     )
 
-    // 2. 利用 animateFloatAsState 负责把控状态切换的“渐变平滑度”！
+    // 暂停时，非常平滑地定格在中心点和固定亮度
     val currentAlpha by animateFloatAsState(
-        targetValue = if (isPlaying) breatheAlpha else 0.40f, // 暂停时平滑过渡到 0.40
-        animationSpec = tween(800), label = "alphaTransition"
+        targetValue = if (isPlaying) targetBreatheAlpha.value else 0.20f,
+        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "alphaState"
     )
-    val currentScale by animateFloatAsState(
-        targetValue = if (isPlaying) breatheScale else 0.85f, // 暂停时平滑收缩到 0.85
-        animationSpec = tween(800), label = "scaleTransition"
+    val currentOffsetX by animateFloatAsState(
+        targetValue = if (isPlaying) targetOffsetX.value else 0.5f,
+        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "xState"
+    )
+    val currentOffsetY by animateFloatAsState(
+        targetValue = if (isPlaying) targetOffsetY.value else 0.5f,
+        animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "yState"
     )
 
-    val brush = Brush.radialGradient(
-        colors = listOf(
-            dominantColor.copy(alpha = currentAlpha),
-            dominantColor.copy(alpha = currentAlpha * 0.45f),
-            surface.copy(alpha = 1f)
-        ),
-        radius = 1800f * currentScale
-    )
-    Box(modifier = modifier.background(brush)) { content() }
+    Box(modifier = modifier.drawBehind {
+        val centerOffset = androidx.compose.ui.geometry.Offset(size.width * currentOffsetX, size.height * currentOffsetY)
+        val brush = Brush.radialGradient(
+            colors = listOf(
+                dominantColor.copy(alpha = currentAlpha),
+                dominantColor.copy(alpha = currentAlpha * 0.45f),
+                surface.copy(alpha = 1f)
+            ),
+            center = centerOffset,
+            radius = size.maxDimension * 0.85f
+        )
+        drawRect(brush = brush)
+    }) { content() }
 }
 
-// ── 音频响应：Visualizer 驱动，需要 RECORD_AUDIO 权限 ─────────────────────────
 @Composable
 private fun ReactiveGradientBackground(
     dominantColor: Color,
     surface: Color,
     isPlaying: Boolean,
-    audioSessionId: Int, // 不再需要这个破参数啦
     modifier: Modifier,
     content: @Composable () -> Unit
 ) {
     var currentAmp by remember { mutableStateOf(0f) }
 
-    // 直接从底层的自研处理器中抽取数据！
+    // 直接抛弃系统的 Visualizer，读我们自己写的拦截器！
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (isActive) {
                 currentAmp = VisualizerData.amplitude
-                delay(16L) // 维持 60fps 刷新率
+                delay(16L) // 60fps 帧率
             }
         } else {
             currentAmp = 0f
@@ -130,14 +118,13 @@ private fun ReactiveGradientBackground(
         }
     }
 
-    // 平滑过滤数值，防止爆音导致的画面闪烁
     val smoothedAmplitude by animateFloatAsState(
         targetValue = currentAmp,
         animationSpec = tween(80, easing = LinearEasing),
         label = "amplitude"
     )
 
-    val topAlpha  = 0.30f + smoothedAmplitude * 0.55f
+    val topAlpha = 0.30f + smoothedAmplitude * 0.55f
     val gradRadius = 1200f + smoothedAmplitude * 1200f
 
     val hsvBuf = FloatArray(3)
