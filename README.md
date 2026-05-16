@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🌌 AURALIS </h1>
+  <h1>🌌 A U R A L I S 音澜</h1>
   <p><b>发烧级音质 · 流体美学 · 跨屏互联</b></p>
   <p><i>重塑本地音乐体验的纯粹之作</i></p>
 </div>
@@ -13,7 +13,7 @@
 
 ## 🌌 寻声之旅，始于 AURALIS
 
-**AURALIS (极光)** 是一款专为音乐发烧友和极简主义者打造的本地 Android 音乐播放器。
+**AURALIS (音澜)** 是一款专为音乐发烧友和极简主义者打造的本地 Android 音乐播放器。
 它不仅拥有 **Bit-perfect USB DAC 源码直通** 的硬核音频引擎，更将 **Jetpack Compose 流体美学** 发挥到极致。从每一次心跳般的律动背景，到指尖划过的丝滑动画，AURALIS 致力于让每一次聆听都成为一场视听盛宴。
 
 ---
@@ -81,10 +81,3 @@ adb reverse tcp:8899 tcp:8899
 * 本项目基于 [MIT License](https://github.com/Rueded/AURALIS/edit/master/LICENSE) 协议开源。欢迎提交 Issue 与 Pull Request 共同完善！
 
 ---
-
-with open("/mnt/data/AURALIS_README.md", "w", encoding="utf-8") as f:
-f.write(markdown_content)
-
-print("Fetched content: Successfully generated AURALIS_README.md")
-
-```
