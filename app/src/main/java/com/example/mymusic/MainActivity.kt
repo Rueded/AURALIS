@@ -113,7 +113,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
 import com.example.mymusic.ui.theme.AuralisTheme
-import kotlin.apply
 
 // ==========================================
 // LRU 音频元数据缓存 (解决快速滑动卡顿)
@@ -400,11 +399,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         setContent {
-           ThemeManager.loadSaved(this)
+            ThemeManager.loadSavedPreset(this)
             AuralisTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                     MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
-                 }
+                    MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
+                }
             }
         }
     }
@@ -560,6 +559,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
 
     var sortType by remember { mutableStateOf(prefs.getString("sort_type", "Name") ?: "Name") }
     var isAscending by remember { mutableStateOf(prefs.getBoolean("is_ascending", true)) }
+    var expandedSortMenu by remember { mutableStateOf(false) }
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
     var sleepTimerSeconds by remember { mutableLongStateOf(0L) }
@@ -829,12 +829,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     currentTitle = mediaMetadata.title?.toString()
                     currentArtist = mediaMetadata.artist?.toString()
                     currentArtwork = mediaMetadata.artworkData
-                    val artBytes = mediaMetadata.artworkData
-                    if (artBytes != null) {
-                        scope.launch {
-                            val bmp = withContext(Dispatchers.IO) {
-                                BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
-                            }
+                    scope.launch {
+                        currentArtwork?.let { bytes ->
+                            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             if (bmp != null) ThemeManager.updateFromArtwork(bmp)
                         }
                     }
@@ -973,22 +970,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             }
 
             HomeHeader(
-                totalSongs    = allSongs.size,
-                searchQuery   = searchQuery,
+                totalSongs = allSongs.size,
+                searchQuery = searchQuery,
                 onSearchChange = { searchQuery = it },
-                sortType      = sortType,
-                isAscending   = isAscending,
-                onSortChange  = { type, asc ->
-                    sortType = type; isAscending = asc
-                    prefs.edit().putString("sort_type", type).putBoolean("is_ascending", asc).apply()
-                },
+                onSortClick = { expandedSortMenu = true },
                 onSettingsClick = { showSettingsScreen = true },
-                onSyncClick = {
-                    if (pcServerIp.endsWith(".") || savedFolderUriStr == null)
-                        showSettingsScreen = true
-                    else
-                        fetchSongsList()
-                }
+                onSyncClick = { if (pcServerIp.endsWith(".") || savedFolderUriStr == null) showSettingsScreen = true else fetchSongsList() },
+                currentTitle = currentTitle
             )
 
             ScrollableTabRow(
@@ -1326,11 +1314,6 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 },
                 pcServerIp = pcServerIp,
                 onPcServerIpChange = { pcServerIp = it; prefs.edit().putString("server_ip", it).apply() },
-
-                // 💡 修复：补上了这两个参数！
-                savedFolderUriStr = savedFolderUriStr,
-                onPickFolder = { folderPickerLauncher.launch(null) },
-
                 allowedFolders = allowedFolders,
                 onFolderAdded = { folder ->
                     val newSet = allowedFolders.toMutableSet().apply { add(folder) }
@@ -2289,18 +2272,9 @@ fun FullScreenPlayer(
             }
         }
 
-        val bgModePref = remember {
-            BackgroundMode.entries.firstOrNull {
-                it.name == prefs.getString("bg_mode", BackgroundMode.BREATHING.name)
-            } ?: BackgroundMode.BREATHING
-        }
-
-        ReactiveBackground(
-            dominantColor  = animatedDominantColor,
-            mode           = bgModePref,
-            isPlaying      = isPlaying,
-            audioSessionId = PlaybackService.audioSessionId,
-            modifier       = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+        Box(
+            modifier = Modifier.fillMaxSize().background(gradientBrush)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
 
             val volumeBarWidth by animateDpAsState(
@@ -2725,11 +2699,10 @@ fun FullScreenPlayer(
                                                         // 注意：为了防止串台，这里用当前真实传进来的 title 和 artist 搜
                                                         val bitmap = CoverFetcher.fetchHighResCover(title, artist)
                                                         if (bitmap != null) {
+                                                            // 顺手存进本地，下次这首歌直接秒开！
                                                             imgFile.outputStream().use {
                                                                 bitmap.compress(Bitmap.CompressFormat.WEBP, 90, it)
                                                             }
-                                                            // 修复：在线封面也触发主题颜色更新
-                                                            scope.launch { ThemeManager.updateFromArtwork(bitmap) }
                                                             bitmap.asImageBitmap()
                                                         } else {
                                                             null // 彻底找不到，交给极光流体兜底
@@ -3540,18 +3513,4 @@ fun generateElegantColors(seedString: String): List<Color> {
         randomElegantColor(false),
         randomElegantColor(true)
     )
-}
-
-@Composable
-fun AnimatedEqIcon(isPlaying: Boolean, modifier: Modifier = Modifier, tint: Color = LocalContentColor.current) {
-    val infiniteTransition = rememberInfiniteTransition(label = "eq")
-    val anim1 by infiniteTransition.animateFloat(initialValue = 0.3f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse), label = "")
-    val anim2 by infiniteTransition.animateFloat(initialValue = 0.6f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse), label = "")
-    val anim3 by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse), label = "")
-
-    Row(modifier = modifier.height(16.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim1 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim2 else 0.4f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
-        Box(modifier = Modifier.width(3.dp).fillMaxHeight(if(isPlaying) anim3 else 0.3f).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
-    }
 }
