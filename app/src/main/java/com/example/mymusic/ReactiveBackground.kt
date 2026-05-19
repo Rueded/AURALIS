@@ -1,180 +1,611 @@
 package com.example.mymusic
 
-import android.media.audiofx.Visualizer
-import androidx.compose.animation.core.*
+import android.content.Context
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.io.File
+import com.example.mymusic.AuralisPreset
+import com.example.mymusic.ThemeManager
 
-enum class BackgroundMode(val label: String) {
-    STATIC("静态渐变"),
-    BREATHING("呼吸律动"),
-    REACTIVE("音频响应")
-}
+// ── 设置项数据模型 ────────────────────────────────────────────────────────────
+private data class SettingToggleItem(
+    val icon: ImageVector,
+    val iconTint: Color,
+    val title: String,
+    val subtitle: String,
+    val checked: Boolean,
+    val enabled: Boolean = true,
+    val onToggle: (Boolean) -> Unit
+)
 
-// ── 对外主组件 ─────────────────────────────────────────────────────────────────
+// ── 主入口 ────────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReactiveBackground(
-    dominantColor: Color,
-    mode: BackgroundMode,
-    isPlaying: Boolean,
-    audioSessionId: Int,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+fun SettingsScreen(
+    onBack: () -> Unit,
+    // ── 从外部注入的状态（与 MainActivity 共享） ──
+    enableReplayGain: Boolean,
+    onReplayGainChange: (Boolean) -> Unit,
+    enableBitPerfect: Boolean,
+    onBitPerfectChange: (Boolean) -> Unit,
+    isPcMode: Boolean,
+    onPcModeChange: (Boolean) -> Unit,
+    pcServerIp: String,
+    onPcServerIpChange: (String) -> Unit,
+    allowedFolders: Set<String>,
+    onFolderAdded: (String) -> Unit,
+    onFolderRemoved: (String) -> Unit,
+    onRescanLibrary: () -> Unit,
+    onBatchImportLrc: () -> Unit,
+    onShowSleepTimer: () -> Unit
 ) {
-    val surface = MaterialTheme.colorScheme.surface
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
-    when (mode) {
-        BackgroundMode.STATIC    -> StaticGradientBackground(dominantColor, surface, modifier, content)
-        BackgroundMode.BREATHING -> BreathingGradientBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.REACTIVE  -> ReactiveGradientBackground(dominantColor, surface, isPlaying, audioSessionId, modifier, content)
-    }
-}
+    // 在线歌词开关（本地持久化）
+    val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
+    var enableOnlineLyrics by remember { mutableStateOf(prefs.getBoolean("enable_online_lyrics", true)) }
+    var onlineLyricsSource by remember { mutableStateOf(prefs.getString("online_lyrics_source", "auto") ?: "auto") }
 
-// ── 静态渐变（原有效果）────────────────────────────────────────────────────────
-@Composable
-private fun StaticGradientBackground(
-    dominantColor: Color,
-    surface: Color,
-    modifier: Modifier,
-    content: @Composable () -> Unit
-) {
-    val brush = Brush.verticalGradient(
-        listOf(
-            dominantColor.copy(alpha = 0.55f),
-            dominantColor.copy(alpha = 0.15f),
-            surface
-        )
-    )
-    Box(modifier = modifier.background(brush)) { content() }
-}
-
-// ── 呼吸渐变：alpha 周期脉动，无需权限 ───────────────────────────────────────
-@Composable
-private fun BreathingGradientBackground(
-    dominantColor: Color,
-    surface: Color,
-    isPlaying: Boolean,
-    modifier: Modifier,
-    content: @Composable () -> Unit
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "breathing")
-
-    // 播放中：0.35 ↔ 0.70 循环；停止时固定 0.40
-    val topAlpha by if (isPlaying) {
-        infiniteTransition.animateFloat(
-            initialValue = 0.35f,
-            targetValue  = 0.70f,
-            animationSpec = infiniteRepeatable(
-                animation  = tween(2800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "breatheAlpha"
-        )
-    } else {
-        remember { mutableStateOf(0.40f) }
+    // 文件夹选择器
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            val path = uri.lastPathSegment?.replace("primary:", "/storage/emulated/0/") ?: return@rememberLauncherForActivityResult
+            onFolderAdded(path)
+        }
     }
 
-    // 播放中：轻微径向膨胀 0.7 ↔ 1.0
-    val radialScale by if (isPlaying) {
-        infiniteTransition.animateFloat(
-            initialValue = 0.70f,
-            targetValue  = 1.00f,
-            animationSpec = infiniteRepeatable(
-                animation  = tween(2800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "breatheScale"
-        )
-    } else {
-        remember { mutableStateOf(0.70f) }
-    }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("设置", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
 
-    val brush = Brush.radialGradient(
-        colors = listOf(
-            dominantColor.copy(alpha = topAlpha),
-            dominantColor.copy(alpha = topAlpha * 0.45f),
-            surface.copy(alpha = 1f)
-        ),
-        radius = 1800f * radialScale
-    )
-
-    Box(modifier = modifier.background(brush)) { content() }
-}
-
-// ── 音频响应：Visualizer 驱动，需要 RECORD_AUDIO 权限 ─────────────────────────
-@Composable
-private fun ReactiveGradientBackground(
-    dominantColor: Color,
-    surface: Color,
-    isPlaying: Boolean,
-    audioSessionId: Int,
-    modifier: Modifier,
-    content: @Composable () -> Unit
-) {
-    var amplitude by remember { mutableStateOf(0f) }
-
-    val smoothedAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying) amplitude else 0f, // 💡 暂停时瞬间将目标值设为 0
-        animationSpec = tween(80, easing = LinearEasing),
-        label = "amplitude"
-    )
-
-    DisposableEffect(audioSessionId, isPlaying) {
-        var visualizer: Visualizer? = null
-        if (isPlaying && audioSessionId != 0) {
-            try {
-                visualizer = Visualizer(audioSessionId).apply {
-                    captureSize = Visualizer.getCaptureSizeRange()[0]
-                    setDataCaptureListener(
-                        object : Visualizer.OnDataCaptureListener {
-                            override fun onWaveFormDataCapture(v: Visualizer, data: ByteArray, samplingRate: Int) {
-                                // 💡 加入双重保险：即使捕获到了，如果不播放也丢弃
-                                if (!isPlaying) {
-                                    amplitude = 0f
-                                    return
-                                }
-                                val rms = data.map { (it.toInt() and 0xFF) - 128 }.map { it * it.toDouble() }.average()
-                                amplitude = (Math.sqrt(rms) / 128f).toFloat().coerceIn(0f, 1f)
-                            }
-                            override fun onFftDataCapture(v: Visualizer, data: ByteArray, samplingRate: Int) {}
-                        },
-                        Visualizer.getMaxCaptureRate() / 2, true, false
+            SettingsSection(
+                title = "外观",
+                icon = Icons.Outlined.Palette,
+                iconTint = MaterialTheme.colorScheme.primary
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        "主题配色",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    enabled = true
+                    Spacer(Modifier.height(12.dp))
+                    ThemePickerGrid(context = context)
                 }
-            } catch (_: Exception) {}
-        }
+            }
 
-        onDispose {
-            try { visualizer?.enabled = false; visualizer?.release() } catch (_: Exception) {}
-            amplitude = 0f // 💡 销毁时彻底归零
+            // ── 一、音频质量 ──────────────────────────────────────────────────
+            SettingsSection(
+                title = "音频质量",
+                icon = Icons.Outlined.Headphones,
+                iconTint = MaterialTheme.colorScheme.primary
+            ) {
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.Equalizer,
+                        iconTint = MaterialTheme.colorScheme.tertiary,
+                        title = "音量标准化",
+                        subtitle = "ReplayGain · 自动平衡不同歌曲响度",
+                        checked = enableReplayGain,
+                        onToggle = onReplayGainChange
+                    )
+                )
+                SettingsDivider()
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.SettingsInputHdmi,
+                        iconTint = if (enableBitPerfect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                        title = "USB 源码直通",
+                        subtitle = if (Build.VERSION.SDK_INT < 34)
+                            "Bit-perfect · 需要 Android 14+ 及外接 DAC"
+                        else if (enableBitPerfect)
+                            "Bit-perfect · 已绕过系统混音器 ✓"
+                        else
+                            "Bit-perfect · 绕过 AudioFlinger，连接 USB DAC 生效",
+                        checked = enableBitPerfect,
+                        enabled = Build.VERSION.SDK_INT >= 34,
+                        onToggle = { checked ->
+                            onBitPerfectChange(checked)
+                            if (checked && Build.VERSION.SDK_INT < 34) {
+                                Toast.makeText(context, "您的系统低于 Android 14，不支持此功能", Toast.LENGTH_SHORT).show()
+                            } else if (checked) {
+                                Toast.makeText(context, "已开启源码直通，请连接 USB DAC", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                )
+            }
+
+            // ── 二、歌词 ──────────────────────────────────────────────────────
+            SettingsSection(
+                title = "歌词",
+                icon = Icons.Outlined.Lyrics,
+                iconTint = MaterialTheme.colorScheme.secondary
+            ) {
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.CloudDownload,
+                        iconTint = MaterialTheme.colorScheme.secondary,
+                        title = "在线歌词搜索",
+                        subtitle = "无本地 LRC 时自动联网获取",
+                        checked = enableOnlineLyrics,
+                        onToggle = { checked ->
+                            enableOnlineLyrics = checked
+                            prefs.edit().putBoolean("enable_online_lyrics", checked).apply()
+                        }
+                    )
+                )
+
+                // 来源选择（仅在在线歌词开启时展示）
+                AnimatedVisibility(
+                    visible = enableOnlineLyrics,
+                    enter = expandVertically(tween(200)),
+                    exit = shrinkVertically(tween(200))
+                ) {
+                    Column {
+                        SettingsDivider()
+                        // 来源选择按钮组
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text(
+                                "优先来源",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("auto" to "自动（最快）", "kugou" to "酷狗", "qq" to "QQ音乐").forEach { (key, label) ->
+                                    val selected = onlineLyricsSource == key
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = {
+                                            onlineLyricsSource = key
+                                            prefs.edit().putString("online_lyrics_source", key).apply()
+                                        },
+                                        label = { Text(label, fontSize = 12.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SettingsDivider()
+                SettingsClickRow(
+                    icon = Icons.Outlined.FileOpen,
+                    iconTint = MaterialTheme.colorScheme.secondary,
+                    title = "批量导入 LRC",
+                    subtitle = "从文件管理器批量选择歌词文件",
+                    onClick = onBatchImportLrc
+                )
+            }
+
+            // ── 三、音乐库 ────────────────────────────────────────────────────
+            SettingsSection(
+                title = "音乐库",
+                icon = Icons.Outlined.LibraryMusic,
+                iconTint = Color(0xFF7C4DFF)
+            ) {
+                // 已添加的扫描路径列表
+                if (allowedFolders.isEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.FolderOpen,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "扫描全盘音乐",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    allowedFolders.forEachIndexed { i, folder ->
+                        if (i > 0) SettingsDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Outlined.Folder,
+                                contentDescription = null,
+                                tint = Color(0xFF7C4DFF),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                folder,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2
+                            )
+                            IconButton(
+                                onClick = { onFolderRemoved(folder) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "移除",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                    }
+                }
+
+                SettingsDivider()
+                SettingsClickRow(
+                    icon = Icons.Outlined.CreateNewFolder,
+                    iconTint = Color(0xFF7C4DFF),
+                    title = "添加扫描路径",
+                    subtitle = "指定文件夹，不再扫描全盘",
+                    onClick = { folderPickerLauncher.launch(null) }
+                )
+                SettingsDivider()
+                SettingsClickRow(
+                    icon = Icons.Outlined.Refresh,
+                    iconTint = Color(0xFF7C4DFF),
+                    title = "重新深度扫描",
+                    subtitle = "清空缓存，重新解析所有音乐文件元数据",
+                    onClick = onRescanLibrary
+                )
+            }
+
+            // ── 四、连接 ──────────────────────────────────────────────────────
+            SettingsSection(
+                title = "连接",
+                icon = Icons.Outlined.Wifi,
+                iconTint = Color(0xFF00897B)
+            ) {
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.Speaker,
+                        iconTint = if (isPcMode) Color(0xFF00897B) else MaterialTheme.colorScheme.outline,
+                        title = "PC 有线音箱模式",
+                        subtitle = if (isPcMode) "正在监听端口…" else "将手机变为 PC 的零延迟音箱",
+                        checked = isPcMode,
+                        onToggle = onPcModeChange
+                    )
+                )
+                SettingsDivider()
+                // IP 输入框
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    OutlinedTextField(
+                        value = pcServerIp,
+                        onValueChange = onPcServerIpChange,
+                        label = { Text("电脑局域网 IP") },
+                        leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
+            // ── 五、其他 ──────────────────────────────────────────────────────
+            SettingsSection(
+                title = "其他",
+                icon = Icons.Outlined.MoreHoriz,
+                iconTint = MaterialTheme.colorScheme.outline
+            ) {
+                SettingsClickRow(
+                    icon = Icons.Outlined.Bedtime,
+                    iconTint = Color(0xFF5C6BC0),
+                    title = "睡眠定时器",
+                    subtitle = "定时暂停播放",
+                    onClick = onShowSleepTimer
+                )
+            }
+
+            Spacer(Modifier.height(32.dp))
         }
     }
+}
 
-    val topAlpha  = 0.30f + smoothedAmplitude * 0.55f
-    val gradRadius = 1200f + smoothedAmplitude * 1200f
+// ── 子组件 ────────────────────────────────────────────────────────────────────
 
-    val hsvBuf = FloatArray(3)
-    android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
-    hsvBuf[0] = (hsvBuf[0] + 30f) % 360f
-    val secondColor = Color(android.graphics.Color.HSVToColor(hsvBuf))
+@Composable
+private fun SettingsSection(
+    title: String,
+    icon: ImageVector,
+    iconTint: Color,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        // 区块标题行
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(iconTint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        // 卡片容器
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(content = content)
+        }
+    }
+}
 
-    val brush = Brush.radialGradient(
-        colors = listOf(
-            dominantColor.copy(alpha = topAlpha),
-            secondColor.copy(alpha = topAlpha * 0.5f),
-            surface.copy(alpha = 1f)
-        ),
-        radius = gradRadius
+@Composable
+private fun SettingToggleRow(item: SettingToggleItem) {
+    val iconTint by animateColorAsState(item.iconTint, tween(300), label = "iconTint")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = item.enabled) { item.onToggle(!item.checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            item.icon,
+            contentDescription = null,
+            tint = if (item.enabled) iconTint else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                item.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = if (item.enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            )
+            Text(
+                item.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (item.enabled) 1f else 0.4f
+                ),
+                lineHeight = 16.sp
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(
+            checked = item.checked,
+            onCheckedChange = { item.onToggle(it) },
+            enabled = item.enabled
+        )
+    }
+}
+
+@Composable
+private fun SettingsClickRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 52.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
     )
-    Box(modifier = modifier.background(brush)) { content() }
+}
+
+@Composable
+fun ThemePickerGrid(context: android.content.Context) {
+    val currentPreset by ThemeManager.preset.collectAsState()
+    val artworkPrimary by ThemeManager.artworkPrimary.collectAsState()
+
+    // 预设信息：(枚举, 代表色, 描述)
+    val presets = listOf(
+        Triple(AuralisPreset.DYNAMIC, artworkPrimary, "跟随专辑封面"),
+        Triple(AuralisPreset.OBSIDIAN, androidx.compose.ui.graphics.Color(0xFFE2E2E2), "近 AMOLED 纯黑"),
+        Triple(AuralisPreset.MIDNIGHT, androidx.compose.ui.graphics.Color(0xFF7EB8F7), "深邃海军蓝"),
+        Triple(AuralisPreset.AMBER, androidx.compose.ui.graphics.Color(0xFFFFB74D), "暖金深棕"),
+        Triple(AuralisPreset.ROSE, androidx.compose.ui.graphics.Color(0xFFF48FB1), "深玫红调"),
+        Triple(AuralisPreset.JADE, androidx.compose.ui.graphics.Color(0xFF80CBC4), "深青绿调"),
+    )
+
+    // 两列网格
+    val rows = presets.chunked(2)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                row.forEach { (preset, color, subtitle) ->
+                    ThemePresetCard(
+                        preset = preset,
+                        accentColor = color,
+                        subtitle = subtitle,
+                        isSelected = currentPreset == preset,
+                        onSelect = { ThemeManager.setPreset(preset, context) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                // 奇数项补空
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemePresetCard(
+    preset: AuralisPreset,
+    accentColor: androidx.compose.ui.graphics.Color,
+    subtitle: String,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+        animationSpec = tween(250), label = "border"
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (isSelected) accentColor.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent,
+        animationSpec = tween(250), label = "bg"
+    )
+
+    Surface(
+        onClick = onSelect,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = bgColor,
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 0.5.dp,
+            color = borderColor
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // 色块预览行
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 主色大圆点
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
+                )
+                // 深色背景小矩形
+                val bgPreview = ThemeManager.buildScheme(preset, accentColor).background
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(bgPreview)
+                )
+                // 选中勾
+                if (isSelected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = accentColor
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = preset.label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
 }
