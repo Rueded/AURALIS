@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许特定音乐服务的明文传输（有些旧资源只有 HTTP） -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">music.163.com</domain>
+        <domain includeSubdomains="true">126.net</domain>
+        <domain includeSubdomains="true">kugou.com</domain>
+    </domain-config>
+
+    <!-- 兜底配置：主要用于局域网同步 (192.168.x.x) -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

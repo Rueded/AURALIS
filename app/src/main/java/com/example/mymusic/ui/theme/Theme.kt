@@ -1,4 +1,4 @@
-package com.example.mymusic.ui.theme
+package com.auralis.app.ui.theme
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
-import com.example.mymusic.ThemeManager
+import com.auralis.app.ThemeManager
 
 // 对 ColorScheme 每个颜色字段做动画，切歌/切主题时平滑过渡
 @Composable

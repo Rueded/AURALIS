@@ -1,4 +1,4 @@
-package com.example.mymusic // 换成你的包名
+package com.auralis.app
 
 import android.content.Context
 import android.net.Uri

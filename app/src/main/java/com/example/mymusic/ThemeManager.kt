@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -31,6 +31,9 @@ object ThemeManager {
 
     private val _preset = MutableStateFlow(AuralisPreset.DYNAMIC)
     val preset: StateFlow<AuralisPreset> = _preset.asStateFlow()
+
+    private val _artworkPalette = MutableStateFlow<AlbumPalette?>(null)
+    val artworkPalette: StateFlow<AlbumPalette?> = _artworkPalette.asStateFlow()
 
     private val _artworkPrimary = MutableStateFlow(Color(0xFF80CBC4))
     val artworkPrimary: StateFlow<Color> = _artworkPrimary.asStateFlow()
@@ -71,20 +74,9 @@ object ThemeManager {
         }
     }
 
-    suspend fun updateFromArtwork(bitmap: Bitmap) = withContext(Dispatchers.Default) {
-        try {
-            val palette = Palette.from(bitmap).maximumColorCount(16).generate()
-            val argb = palette.getVibrantColor(0).takeIf { it != 0 }
-                ?: palette.getDarkVibrantColor(0).takeIf { it != 0 }
-                ?: palette.getMutedColor(0).takeIf { it != 0 }
-                ?: palette.getDominantColor(0xFF80CBC4.toInt())
-
-            val hsv = FloatArray(3)
-            android.graphics.Color.colorToHSV(argb, hsv)
-            hsv[1] = hsv[1].coerceAtLeast(0.35f)
-            hsv[2] = hsv[2].coerceIn(0.5f, 0.95f)
-            _artworkPrimary.value = Color(android.graphics.Color.HSVToColor(hsv))
-        } catch (_: Exception) {}
+    fun updateFromPalette(palette: AlbumPalette) {
+        _artworkPalette.value = palette
+        _artworkPrimary.value = palette.primary
     }
 
     fun getHue(color: Color): Float {
@@ -94,7 +86,10 @@ object ThemeManager {
     }
 
     fun buildScheme(preset: AuralisPreset, artworkPrimary: Color, customHue: Float, isDark: Boolean): ColorScheme = when (preset) {
-        AuralisPreset.DYNAMIC -> if (isDark) dynamicDark(artworkPrimary) else dynamicLight(artworkPrimary)
+        AuralisPreset.DYNAMIC -> {
+            val palette = _artworkPalette.value
+            if (isDark) dynamicDark(artworkPrimary, palette) else dynamicLight(artworkPrimary, palette)
+        }
         AuralisPreset.CUSTOM  -> if (isDark) hueToSchemeDark(customHue) else hueToSchemeLight(customHue)
         AuralisPreset.OBSIDIAN -> if (isDark) obsidianDark() else obsidianLight()
         AuralisPreset.MIDNIGHT -> if (isDark) midnightDark() else midnightLight()
@@ -122,34 +117,40 @@ object ThemeManager {
     private fun hueToColor(hue: Float): Color = Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.7f, 0.85f)))
 
     // ── 专辑色 ─────────────────────────────────────────────────────────────
-    private fun dynamicDark(primary: Color): ColorScheme {
+    private fun dynamicDark(primary: Color, palette: AlbumPalette? = null): ColorScheme {
         val hsv = primary.toHsv()
+        val secondary = palette?.secondary ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, hsv[1] * 0.65f, hsv[2] * 0.75f)))
+        val accent = palette?.accent ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 60f) % 360f, hsv[1] * 0.5f, hsv[2] * 0.8f)))
+        
         return darkColorScheme(
             primary             = primary,
             onPrimary           = Color(0xFF0D0D0D),
-            primaryContainer    = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.5f, (hsv[2] * 0.22f).coerceAtMost(0.20f)))),
+            primaryContainer    = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.4f, (hsv[2] * 0.20f).coerceAtMost(0.18f)))),
             onPrimaryContainer  = primary.copy(alpha = 0.9f),
-            secondary           = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, hsv[1] * 0.65f, hsv[2] * 0.75f))),
+            secondary           = secondary,
             onSecondary         = Color(0xFF0D0D0D),
-            secondaryContainer  = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.4f, 0.14f))),
-            onSecondaryContainer = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, 0.5f, 0.85f))),
-            background          = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.08f, 0.06f))),
-            surface             = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.07f, 0.10f))),
-            surfaceVariant      = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.06f, 0.13f))),
+            secondaryContainer  = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.35f, 0.12f))),
+            onSecondaryContainer = secondary.copy(alpha = 0.85f),
+            tertiary            = accent,
+            background          = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.08f, 0.05f))),
+            surface             = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.07f, 0.08f))),
+            surfaceVariant      = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.06f, 0.12f))),
         )
     }
 
-    private fun dynamicLight(primary: Color): ColorScheme {
+    private fun dynamicLight(primary: Color, palette: AlbumPalette? = null): ColorScheme {
         val hsv = primary.toHsv()
+        val secondary = palette?.secondary ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, hsv[1] * 0.45f, 0.45f)))
+        
         val darkPrimary = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1].coerceAtLeast(0.5f), (hsv[2] * 0.6f).coerceAtMost(0.55f))))
         return lightColorScheme(
             primary             = darkPrimary,
-            primaryContainer    = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.3f, 0.94f))),
-            secondary           = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, 0.45f, 0.45f))),
-            secondaryContainer  = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, 0.2f, 0.95f))),
-            background          = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.03f, 0.98f))),
+            primaryContainer    = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], hsv[1] * 0.25f, 0.96f))),
+            secondary           = secondary,
+            secondaryContainer  = Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, 0.15f, 0.97f))),
+            background          = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.02f, 0.99f))),
             surface             = Color.White,
-            surfaceVariant      = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.06f, 0.94f))),
+            surfaceVariant      = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.05f, 0.95f))),
         )
     }
 

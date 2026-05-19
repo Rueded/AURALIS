@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -34,14 +34,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** 首页顶部氛围光晕，随封面主色轻微变化 */
+/** 首页顶部氛围光晕，随封面多维色调深度演化 */
 @Composable
 fun HomeAmbientBackground(
-    accentColor: Color?,
+    palette: AlbumPalette?,
     modifier: Modifier = Modifier
 ) {
-    val accent = accentColor ?: MaterialTheme.colorScheme.primary
-    val animatedAccent by animateColorAsState(accent, tween(800), label = "homeAccent")
+    val primary = palette?.primary ?: MaterialTheme.colorScheme.primary
+    val secondary = palette?.secondary ?: MaterialTheme.colorScheme.secondary
+    val accent = palette?.accent ?: MaterialTheme.colorScheme.tertiary
+    
+    val animatedPrimary by animateColorAsState(primary, tween(1000, easing = LinearOutSlowInEasing), label = "hPrimary")
+    val animatedSecondary by animateColorAsState(secondary, tween(1000, easing = LinearOutSlowInEasing), label = "hSecondary")
+    val animatedAccent by animateColorAsState(accent, tween(1000, easing = LinearOutSlowInEasing), label = "hAccent")
+    
     val surface = MaterialTheme.colorScheme.background
 
     Box(
@@ -51,23 +57,33 @@ fun HomeAmbientBackground(
             .background(
                 Brush.radialGradient(
                     colors = listOf(
-                        animatedAccent.copy(alpha = 0.22f),
-                        animatedAccent.copy(alpha = 0.06f),
+                        animatedPrimary.copy(alpha = 0.25f),
+                        animatedSecondary.copy(alpha = 0.10f),
                         Color.Transparent
                     ),
-                    center = Offset(0.35f, 0f),
-                    radius = 1200f
+                    center = Offset(0.2f, -0.1f),
+                    radius = 1500f
+                )
+            )
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        animatedAccent.copy(alpha = 0.15f),
+                        Color.Transparent
+                    ),
+                    center = Offset(0.9f, 0.1f),
+                    radius = 1000f
                 )
             )
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
                         Color.Transparent,
-                        surface.copy(alpha = 0.4f),
+                        surface.copy(alpha = 0.5f),
                         surface
                     ),
                     startY = 0f,
-                    endY = Float.POSITIVE_INFINITY
+                    endY = 1200f
                 )
             )
     )

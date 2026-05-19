@@ -1,4 +1,4 @@
-package com.example.mymusic // 保持你自己的包名
+package com.auralis.app
 
 import androidx.room.Dao
 import androidx.room.Insert

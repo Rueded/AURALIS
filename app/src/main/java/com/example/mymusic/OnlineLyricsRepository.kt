@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import android.content.Context
 import android.util.Log
@@ -202,7 +202,7 @@ object OnlineLyricsRepository {
     private fun fetchKugouLyrics(keyword: String): LyricsResult? {
         return try {
             val searchUrl =
-                "http://mobilecdn.kugou.com/api/v3/search/song?keyword=" +
+                "https://msearch.kugou.com/api/v3/search/song?keyword=" +
                         "${URLEncoder.encode(keyword, "UTF-8")}&page=1&pagesize=5&format=json"
             val searchResp = getJson(searchUrl) ?: return null
             val songs =

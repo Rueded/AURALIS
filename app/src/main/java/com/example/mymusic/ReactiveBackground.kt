@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -34,20 +34,21 @@ enum class BackgroundMode(val label: String) {
 @Composable
 fun ReactiveBackground(
     dominantColor: Color,
+    palette: AlbumPalette?,
     mode: BackgroundMode,
     isPlaying: Boolean,
     audioSessionId: Int,
     modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
 ) {
     val surface = MaterialTheme.colorScheme.surface
     when (mode) {
-        BackgroundMode.STATIC     -> StaticGradientBackground(dominantColor, surface, modifier, content)
-        BackgroundMode.BREATHING  -> BreathingGradientBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.FLUID      -> AppleFluidBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.HORIZON    -> PremiumHorizonBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.CLASSIC_EQ -> ClassicLineEqBackground(dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.STARDUST   -> StardustBackground(dominantColor, surface, isPlaying, modifier, content)
+        BackgroundMode.STATIC     -> StaticGradientBackground(palette, dominantColor, surface, modifier, content)
+        BackgroundMode.BREATHING  -> BreathingGradientBackground(palette, dominantColor, surface, isPlaying, modifier, content)
+        BackgroundMode.FLUID      -> AppleFluidBackground(palette, dominantColor, surface, isPlaying, modifier, content)
+        BackgroundMode.HORIZON    -> PremiumHorizonBackground(palette, dominantColor, surface, isPlaying, modifier, content)
+        BackgroundMode.CLASSIC_EQ -> ClassicLineEqBackground(palette, dominantColor, surface, isPlaying, modifier, content)
+        BackgroundMode.STARDUST   -> StardustBackground(palette, dominantColor, surface, isPlaying, modifier, content)
     }
 }
 
@@ -96,10 +97,12 @@ private data class StarParticle(
 )
 
 @Composable
-private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+private fun StardustBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val displayAmp = rememberAudioAmplitude(isPlaying)
     val infiniteTransition = rememberInfiniteTransition(label = "stardust")
     val phase by infiniteTransition.animateFloat(0f, 1000f, infiniteRepeatable(tween(30000, easing = LinearEasing)), label = "phase")
+
+    val accent = palette?.accent ?: palette?.secondary ?: dominantColor
 
     val particles = remember {
         List(100) {
@@ -168,13 +171,15 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
             val finalAlpha = (baseAlpha * fadeOut).coerceIn(0f, 1f)
 
             val centerOffset = Offset(xPos, yPos)
+            
+            val pColor = if (star.flareType == 8) accent else dominantColor
 
             if (react > 0.05f) {
                 val glowRadius = pRadius * 3.5f
-                drawCircle(Brush.radialGradient(listOf(dominantColor.copy(alpha = finalAlpha * 0.35f), Color.Transparent), center = centerOffset, radius = glowRadius), radius = glowRadius, center = centerOffset)
+                drawCircle(Brush.radialGradient(listOf(pColor.copy(alpha = finalAlpha * 0.35f), Color.Transparent), center = centerOffset, radius = glowRadius), radius = glowRadius, center = centerOffset)
             }
 
-            drawCircle(color = dominantColor.copy(alpha = finalAlpha), radius = pRadius, center = centerOffset)
+            drawCircle(color = pColor.copy(alpha = finalAlpha), radius = pRadius, center = centerOffset)
 
             if (star.flareType > 0) {
                 val baseFlareLen = star.baseSize * (if (star.flareType == 8) 12f else 8f) * (react + 0.3f)
@@ -198,7 +203,7 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
                     val startOffset = Offset(xPos - dx, yPos - dy)
                     val endOffset = Offset(xPos + dx, yPos + dy)
 
-                    val centerColor = dominantColor.copy(alpha = actualAlpha.coerceIn(0f, 1f))
+                    val centerColor = pColor.copy(alpha = actualAlpha.coerceIn(0f, 1f))
                     val flareBrush = Brush.linearGradient(
                         colors = listOf(Color.Transparent, centerColor, Color.Transparent),
                         start = startOffset,
@@ -218,10 +223,12 @@ private fun StardustBackground(dominantColor: Color, surface: Color, isPlaying: 
 // 📊 顶级极细 EQ
 // ==========================================
 @Composable
-private fun ClassicLineEqBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+private fun ClassicLineEqBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val displayAmp = rememberAudioAmplitude(isPlaying)
     val infiniteTransition = rememberInfiniteTransition(label = "eq")
     val phase by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(2000, easing = LinearEasing)), label = "phase")
+
+    val accent = palette?.secondary ?: dominantColor
 
     Box(modifier = modifier.drawBehind {
         drawRect(dominantColor.copy(alpha = 0.05f))
@@ -240,9 +247,11 @@ private fun ClassicLineEqBackground(dominantColor: Color, surface: Color, isPlay
             val randomRipple = freq1 * 0.6f + freq2 * 0.4f
             val barHeight = 4f + (maxBarHeight * displayAmp * bellCurve * randomRipple * 1.5f)
             val baseAlpha = 0.2f + (displayAmp * 0.8f * bellCurve)
+            
+            val barColor = if (i % 2 == 0) dominantColor else accent
 
-            drawLine(color = dominantColor.copy(alpha = (baseAlpha * 0.25f).coerceIn(0f, 1f)), start = Offset(x, size.height), end = Offset(x, size.height - barHeight), strokeWidth = 8f, cap = StrokeCap.Round)
-            drawLine(color = dominantColor.copy(alpha = baseAlpha.coerceIn(0f, 1f)), start = Offset(x, size.height), end = Offset(x, size.height - barHeight), strokeWidth = 1.5f, cap = StrokeCap.Round)
+            drawLine(color = barColor.copy(alpha = (baseAlpha * 0.25f).coerceIn(0f, 1f)), start = Offset(x, size.height), end = Offset(x, size.height - barHeight), strokeWidth = 8f, cap = StrokeCap.Round)
+            drawLine(color = barColor.copy(alpha = baseAlpha.coerceIn(0f, 1f)), start = Offset(x, size.height), end = Offset(x, size.height - barHeight), strokeWidth = 1.5f, cap = StrokeCap.Round)
         }
     }) { content() }
 }
@@ -251,17 +260,20 @@ private fun ClassicLineEqBackground(dominantColor: Color, surface: Color, isPlay
 // 🌌 Premium Horizon V2
 // ==========================================
 @Composable
-private fun PremiumHorizonBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+private fun PremiumHorizonBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val displayAmp = rememberAudioAmplitude(isPlaying)
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val phase by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "phase")
+
+    val accent = palette?.secondary ?: dominantColor
 
     Box(modifier = modifier.drawBehind {
         drawRect(dominantColor.copy(alpha = 0.08f))
         val centerY = size.height * 0.695f
         val glowHeight = size.height * 0.15f + (displayAmp * size.height * 0.35f)
-        drawRect(brush = Brush.verticalGradient(listOf(Color.Transparent, dominantColor.copy(alpha = 0.1f + displayAmp * 0.2f)), startY = centerY - glowHeight, endY = centerY), topLeft = Offset(0f, centerY - glowHeight), size = Size(size.width, glowHeight))
-        drawRect(brush = Brush.verticalGradient(listOf(dominantColor.copy(alpha = 0.1f + displayAmp * 0.2f), Color.Transparent), startY = centerY, endY = centerY + glowHeight), topLeft = Offset(0f, centerY), size = Size(size.width, glowHeight))
+        
+        drawRect(brush = Brush.verticalGradient(listOf(Color.Transparent, accent.copy(alpha = 0.1f + displayAmp * 0.2f)), startY = centerY - glowHeight, endY = centerY), topLeft = Offset(0f, centerY - glowHeight), size = Size(size.width, glowHeight))
+        drawRect(brush = Brush.verticalGradient(listOf(accent.copy(alpha = 0.1f + displayAmp * 0.2f), Color.Transparent), startY = centerY, endY = centerY + glowHeight), topLeft = Offset(0f, centerY), size = Size(size.width, glowHeight))
 
         val wavePath = Path()
         wavePath.moveTo(0f, centerY)
@@ -281,19 +293,27 @@ private fun PremiumHorizonBackground(dominantColor: Color, surface: Color, isPla
 // 🍎 Apple Fluid
 // ==========================================
 @Composable
-private fun AppleFluidBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+private fun AppleFluidBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val displayAmp = rememberAudioAmplitude(isPlaying)
     val infiniteTransition = rememberInfiniteTransition(label = "ambient")
     val phase1 by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(13000, easing = LinearEasing)), label = "p1")
     val phase2 by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(17000, easing = LinearEasing)), label = "p2")
 
-    val hsvBuf = FloatArray(3)
-    android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
-    val baseHue = hsvBuf[0]; val baseSat = hsvBuf[1]
-    hsvBuf[0] = (baseHue - 25f + 360f) % 360f; hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
-    val colorLeft = Color(android.graphics.Color.HSVToColor(hsvBuf))
-    hsvBuf[0] = (baseHue + 25f) % 360f; hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
-    val colorRight = Color(android.graphics.Color.HSVToColor(hsvBuf))
+    val colorLeft = palette?.secondary ?: run {
+        val hsvBuf = FloatArray(3)
+        android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
+        val baseHue = hsvBuf[0]; val baseSat = hsvBuf[1]
+        hsvBuf[0] = (baseHue - 25f + 360f) % 360f; hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
+        Color(android.graphics.Color.HSVToColor(hsvBuf))
+    }
+    
+    val colorRight = palette?.accent ?: run {
+        val hsvBuf = FloatArray(3)
+        android.graphics.Color.colorToHSV(dominantColor.toArgb(), hsvBuf)
+        val baseHue = hsvBuf[0]; val baseSat = hsvBuf[1]
+        hsvBuf[0] = (baseHue + 25f) % 360f; hsvBuf[1] = (baseSat + 0.1f).coerceAtMost(1f)
+        Color(android.graphics.Color.HSVToColor(hsvBuf))
+    }
 
     Box(modifier = modifier.drawBehind {
         drawRect(dominantColor.copy(alpha = 0.12f))
@@ -313,13 +333,15 @@ private fun AppleFluidBackground(dominantColor: Color, surface: Color, isPlaying
 }
 
 @Composable
-private fun StaticGradientBackground(dominantColor: Color, surface: Color, modifier: Modifier, content: @Composable () -> Unit) {
-    val brush = Brush.verticalGradient(listOf(dominantColor.copy(alpha = 0.55f), dominantColor.copy(alpha = 0.15f), surface))
+private fun StaticGradientBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val topColor = dominantColor
+    val midColor = palette?.secondary ?: dominantColor
+    val brush = Brush.verticalGradient(listOf(topColor.copy(alpha = 0.55f), midColor.copy(alpha = 0.25f), surface))
     Box(modifier = modifier.background(brush)) { content() }
 }
 
 @Composable
-private fun BreathingGradientBackground(dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+private fun BreathingGradientBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val infiniteTransition = rememberInfiniteTransition(label = "breathing")
     val targetBreatheAlpha = infiniteTransition.animateFloat(0.20f, 0.45f, infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "alpha")
     val targetOffsetX = infiniteTransition.animateFloat(0.2f, 0.8f, infiniteRepeatable(tween(8500, easing = LinearEasing), RepeatMode.Reverse), label = "x")
@@ -330,8 +352,10 @@ private fun BreathingGradientBackground(dominantColor: Color, surface: Color, is
     val currentOffsetX = 0.5f + (targetOffsetX.value - 0.5f) * playFraction
     val currentOffsetY = 0.5f + (targetOffsetY.value - 0.5f) * playFraction
 
+    val accent = palette?.secondary ?: dominantColor
+
     Box(modifier = modifier.drawBehind {
         val centerOffset = Offset(size.width * currentOffsetX, size.height * currentOffsetY)
-        drawRect(Brush.radialGradient(listOf(dominantColor.copy(alpha = currentAlpha), dominantColor.copy(alpha = currentAlpha * 0.45f), surface.copy(alpha = 1f)), center = centerOffset, radius = size.maxDimension * 0.85f))
+        drawRect(Brush.radialGradient(listOf(dominantColor.copy(alpha = currentAlpha), accent.copy(alpha = currentAlpha * 0.6f), surface.copy(alpha = 1f)), center = centerOffset, radius = size.maxDimension * 0.85f))
     }) { content() }
 }

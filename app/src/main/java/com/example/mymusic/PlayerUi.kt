@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.*

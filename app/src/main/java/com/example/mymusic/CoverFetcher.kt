@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -69,6 +69,9 @@ object CoverFetcher {
                 if (songs != null && songs.length() > 0) {
                     var picUrl = songs.getJSONObject(0).optJSONObject("album")?.optString("picUrl")
                     if (!picUrl.isNullOrEmpty()) {
+                        // 🔮 强制使用 HTTPS 避免被系统拦截，且网易云支持 HTTPS
+                        if (picUrl.startsWith("http://")) picUrl = picUrl.replace("http://", "https://")
+
                         // 🔮 网易云强制请求 600x600 的清晰图
                         picUrl = if (picUrl.contains("?")) "$picUrl&param=600y600" else "$picUrl?param=600y600"
                         val bitmap = downloadBitmap(picUrl)

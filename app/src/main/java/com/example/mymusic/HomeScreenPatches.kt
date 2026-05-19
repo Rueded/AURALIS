@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult

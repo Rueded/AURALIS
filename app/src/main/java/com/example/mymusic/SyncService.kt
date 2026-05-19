@@ -1,4 +1,4 @@
-package com.example.mymusic // 换成你的包名
+package com.auralis.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -108,7 +108,7 @@ class SyncService : Service() {
                         delay(1000)
 
                         // 任务真正完成，发送广播通知主界面刷新
-                        val broadcastIntent = Intent("com.example.mymusic.SYNC_COMPLETED")
+                        val broadcastIntent = Intent("com.auralis.app.SYNC_COMPLETED")
                         sendBroadcast(broadcastIntent)
 
                         delay(1000)

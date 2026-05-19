@@ -1,4 +1,4 @@
-package com.example.mymusic
+package com.auralis.app
 
 import android.app.PendingIntent
 import android.content.Context

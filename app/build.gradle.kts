@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.mymusic"
+    namespace = "com.auralis.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.mymusic"
+        applicationId = "com.auralis.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 3
