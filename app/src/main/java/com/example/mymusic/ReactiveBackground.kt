@@ -258,7 +258,7 @@ private fun PremiumHorizonBackground(dominantColor: Color, surface: Color, isPla
 
     Box(modifier = modifier.drawBehind {
         drawRect(dominantColor.copy(alpha = 0.08f))
-        val centerY = size.height * 0.68f
+        val centerY = size.height * 0.695f
         val glowHeight = size.height * 0.15f + (displayAmp * size.height * 0.35f)
         drawRect(brush = Brush.verticalGradient(listOf(Color.Transparent, dominantColor.copy(alpha = 0.1f + displayAmp * 0.2f)), startY = centerY - glowHeight, endY = centerY), topLeft = Offset(0f, centerY - glowHeight), size = Size(size.width, glowHeight))
         drawRect(brush = Brush.verticalGradient(listOf(dominantColor.copy(alpha = 0.1f + displayAmp * 0.2f), Color.Transparent), startY = centerY, endY = centerY + glowHeight), topLeft = Offset(0f, centerY), size = Size(size.width, glowHeight))

@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -72,22 +74,23 @@ fun HomeHeader(
                     "AURALIS",
                     style = MaterialTheme.typography.labelSmall,
                     color = primary,
-                    letterSpacing = 3.sp,
-                    fontWeight = FontWeight.Medium
+                    letterSpacing = 4.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
+                Spacer(Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         "$totalSongs",
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         "首曲目",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        modifier = Modifier.padding(bottom = 5.dp)
                     )
                 }
             }
@@ -161,48 +164,120 @@ fun HomeHeader(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            FilledTonalIconButton(
+            FilledTonalButton(
                 onClick = onSyncClick,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.height(40.dp),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
                 Icon(Icons.Filled.Sync, "同步", modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(4.dp))
         }
 
-        // ── 搜索栏 ──────────────────────────────────────────────────────────
-        OutlinedTextField(
+        // ── 搜索栏（玻璃质感）────────────────────────────────────────────────
+        TextField(
             value = searchQuery,
             onValueChange = onSearchChange,
             placeholder = {
                 Text(
                     "搜索歌名、歌手、格式…",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                 )
             },
             leadingIcon = {
-                Icon(Icons.Filled.Search, "搜索",
+                Icon(
+                    Icons.Filled.Search, "搜索",
                     modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    tint = primary.copy(alpha = 0.85f)
+                )
             },
             trailingIcon = if (searchQuery.isNotEmpty()) {
-                { IconButton(onClick = { onSearchChange("") }) {
-                    Icon(Icons.Filled.Close, "清除", modifier = Modifier.size(18.dp)) }
+                {
+                    IconButton(onClick = { onSearchChange("") }) {
+                        Icon(Icons.Filled.Close, "清除", modifier = Modifier.size(18.dp))
+                    }
                 }
             } else null,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            shape = RoundedCornerShape(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .shadow(8.dp, RoundedCornerShape(18.dp), spotColor = primary.copy(alpha = 0.12f)),
+            shape = RoundedCornerShape(18.dp),
             singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor   = primary.copy(alpha = 0.6f),
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                focusedContainerColor   = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent
             )
         )
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SongCoverThumb — 列表/常听榜共用封面（防串图）
+// ══════════════════════════════════════════════════════════════════════════════
+@Composable
+fun SongCoverThumb(
+    song: Song,
+    isCurrentSong: Boolean,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 20.dp
+) {
+    val context = LocalContext.current
+    val cachedInfo = AudioCache.getFromMemory(song.data)
+    var bitmap by remember(song.data) { mutableStateOf(cachedInfo?.bitmap) }
+
+    val globalCover by PlayerStateHolder.coverBitmap.collectAsState()
+    val playingPath by PlayerStateHolder.currentPathState.collectAsState()
+
+    LaunchedEffect(globalCover, playingPath, isCurrentSong, song.data) {
+        if (isCurrentSong && playingPath == song.data && globalCover != null) {
+            bitmap = globalCover
+        } else if (!isCurrentSong || playingPath != song.data) {
+            AudioCache.getFromMemory(song.data)?.bitmap?.let { bitmap = it }
+        }
+    }
+
+    LaunchedEffect(song.data) {
+        if (bitmap != null) return@LaunchedEffect
+        val disk = AudioCache.loadFromDisk(context, song)
+        if (disk?.bitmap != null) {
+            if (!(isCurrentSong && playingPath == song.data)) bitmap = disk.bitmap
+            return@LaunchedEffect
+        }
+        delay(200)
+        val fresh = AudioCache.extractAndSave(context, song)
+        if (!(isCurrentSong && playingPath == song.data)) bitmap = fresh.bitmap
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = "封面",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AdvancedFluidCover(
+                seedString = song.data,
+                iconSize = iconSize,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        if (isCurrentSong) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                PlayingWaveform(isPlaying = isPlaying)
+            }
+        }
     }
 }
 
@@ -227,16 +302,7 @@ fun SongItemUI(
     val scope = rememberCoroutineScope()
 
     val cachedInfo = AudioCache.getFromMemory(song.data)
-    var spec   by remember(song.data) { mutableStateOf(cachedInfo?.spec) }
-    var bitmap by remember(song.data) { mutableStateOf(cachedInfo?.bitmap) }
-
-    val globalCover by PlayerStateHolder.coverBitmap.collectAsState()
-    LaunchedEffect(globalCover, isCurrentSong) {
-        // 只有当前正在播放的那首歌，才允许它强行更新为全局下载的高清封面！
-        if (isCurrentSong && globalCover != null) {
-            bitmap = globalCover
-        }
-    }
+    var spec by remember(song.data) { mutableStateOf(cachedInfo?.spec) }
 
     var showButtonMenu    by remember { mutableStateOf(false) }
     var showTouchMenu     by remember { mutableStateOf(false) }
@@ -270,21 +336,16 @@ fun SongItemUI(
 
     LaunchedEffect(song.data) {
         if (spec != null) return@LaunchedEffect
+        val mem = AudioCache.getFromMemory(song.data)
+        if (mem != null) { spec = mem.spec; return@LaunchedEffect }
         val disk = AudioCache.loadFromDisk(context, song)
-        if (disk != null) { spec = disk.spec; bitmap = disk.bitmap; return@LaunchedEffect }
+        if (disk != null) { spec = disk.spec; return@LaunchedEffect }
         delay(250)
-        val fresh = AudioCache.extractAndSave(context, song)
-        spec = fresh.spec; bitmap = fresh.bitmap
+        spec = AudioCache.extractAndSave(context, song).spec
     }
 
     val marqueeModifier =
         if (isPlaying && allowMarquee) Modifier.basicMarquee() else Modifier
-
-    // 播放中行高亮
-    val rowBg by animateColorAsState(
-        targetValue = if (isCurrentSong) MaterialTheme.colorScheme.primary.copy(alpha = 0.07f) else Color.Transparent,
-        animationSpec = tween(400), label = "rowBg"
-    )
 
     // 菜单项（三点按钮和长按都用这个）
     val menuItems = @Composable {
@@ -321,7 +382,32 @@ fun SongItemUI(
         )
     }
 
-    Box(modifier = Modifier.fillMaxWidth().background(rowBg)) {
+    val cardShape = RoundedCornerShape(16.dp)
+    val cardBg by animateColorAsState(
+        targetValue = if (isCurrentSong)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+        else
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        animationSpec = tween(350),
+        label = "cardBg"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(
+                    elevation = if (isCurrentSong) 6.dp else 2.dp,
+                    shape = cardShape,
+                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                )
+                .clip(cardShape)
+                .background(cardBg)
+        ) {
 
         // 长按锚点菜单
         Box(
@@ -346,43 +432,27 @@ fun SongItemUI(
                         }
                     )
                 }
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 序号
-            Text("${index + 1}", color = if (isCurrentSong) MaterialTheme.colorScheme.primary else Color.Gray,
+            Text(
+                "${index + 1}",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isCurrentSong) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.width(28.dp),
                 textAlign = TextAlign.Center
             )
 
-            // ── 封面（修复：使用圆角正方形，和原版圆形保持一致）──────────────
-            Box(
+            SongCoverThumb(
+                song = song,
+                isCurrentSong = isCurrentSong,
+                isPlaying = isPlaying,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap!!,
-                        contentDescription = "封面",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    AdvancedFluidCover(
-                        seedString = song.data,
-                        iconSize = 20.dp,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                // ── 修复：isPlaying=false 时律动条不再显示 ──────────────────
-                if (isCurrentSong) {
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
-                        PlayingWaveform(isPlaying = isPlaying) // 👈 只有这里用 isPlaying，决定它跳不跳！
-                    }
-                }
-            }
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
 
             Spacer(Modifier.width(12.dp))
 
@@ -431,7 +501,7 @@ fun SongItemUI(
                     Text(
                         song.artist,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
@@ -441,8 +511,8 @@ fun SongItemUI(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "${song.size / 1048576} MB",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
                     )
                 }
             }
@@ -450,7 +520,10 @@ fun SongItemUI(
             // 三点菜单
             Box {
                 IconButton(onClick = { showButtonMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, "菜单", tint = Color.Gray)
+                    Icon(
+                        Icons.Filled.MoreVert, "菜单",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
                 }
                 DropdownMenu(expanded = showButtonMenu, onDismissRequest = closeAllMenus) {
                     menuItems()
@@ -458,18 +531,8 @@ fun SongItemUI(
             }
         }
 
-        // 播放中左侧竖线
-        if (isCurrentSong) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(3.dp)
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
-    }
+        } // card inner
+    } // outer padding box
 
     if (showDeleteConfirm) {
         AlertDialog(
