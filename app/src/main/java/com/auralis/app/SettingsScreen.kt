@@ -203,6 +203,28 @@ fun SettingsScreen(
                         onToggle = { onBitPerfectChange(it) }
                     )
                 )
+                SettingsDivider()
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    var crossfadeSecs by remember { mutableFloatStateOf(prefs.getFloat("crossfade_duration", 0f)) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CompareArrows, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Text("淡入淡出 (Crossfade)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        }
+                        Text(if (crossfadeSecs > 0) "${crossfadeSecs.toInt()}s" else "关闭", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text("切歌时音频平滑过渡，消除生硬停顿", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 36.dp))
+                    Slider(
+                        value = crossfadeSecs,
+                        onValueChange = { crossfadeSecs = it },
+                        onValueChangeFinished = { prefs.edit().putFloat("crossfade_duration", crossfadeSecs).apply() },
+                        valueRange = 0f..10f,
+                        steps = 9,
+                        modifier = Modifier.fillMaxWidth().padding(start = 28.dp)
+                    )
+                }
             }
 
             // ── 二 歌词 ────────────────────────────────────────

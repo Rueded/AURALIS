@@ -466,30 +466,28 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     currentAudioPath = mediaItem?.mediaId ?: ""
                     PlayerStateHolder.onTrackChanged(currentAudioPath)
 
-                    // 👇 修复后的 ReplayGain 核心智能调音逻辑
+                    // 👇 修复后的 ReplayGain 核心智能调音逻辑，兼容淡入淡出
                     scope.launch(Dispatchers.IO) {
                         val path = currentAudioPath
                         if (path.isNotEmpty() && enableReplayGain) {
-                            // 1. 获取所有歌曲流并拿到最新的一次快照
                             val allSongsList = dao.getAllSongs().first()
-
-                            // 2. 找到当前正在播放的这首歌
                             val currentSongDb = allSongsList.find { it.data == path }
-
-                            // 3. 拿出它的增益值
                             val gainDb = currentSongDb?.replayGain ?: 0f
-
-                            // 4. 增益换算公式 (需要 import kotlin.math.pow)
                             val linearVolume = (10.0).pow(gainDb / 20.0).toFloat().coerceIn(0.1f, 1.0f)
 
                             withContext(Dispatchers.Main) {
-                                // 偷偷调整 ExoPlayer 的内部音量
-                                mediaController?.setVolume(linearVolume)
+                                PlaybackService.targetVolume = linearVolume
+                                // ⚠️ 只有在没有进行淡入淡出时，才允许强行干预音量，否则交给渐变动画处理
+                                if (!PlaybackService.isCrossfading) {
+                                    mediaController?.setVolume(linearVolume)
+                                }
                             }
                         } else {
-                            // 没开开关，或者路径为空，保持 100% 原始输出
                             withContext(Dispatchers.Main) {
-                                mediaController?.setVolume(1.0f)
+                                PlaybackService.targetVolume = 1.0f
+                                if (!PlaybackService.isCrossfading) {
+                                    mediaController?.setVolume(1.0f)
+                                }
                             }
                         }
                     }
@@ -788,7 +786,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
 
                         3 -> {
-                            val albumGroups = remember(allSongs) { allSongs.groupBy { it.album }.toList().sortedBy { it.first } }
+                            val lowerQuery = searchQuery.lowercase().trim()
+                            val albumGroups = remember(allSongs, lowerQuery) {
+                                allSongs.groupBy { it.album }
+                                    .toList()
+                                    .filter { it.first.lowercase().contains(lowerQuery) || it.second.any { s -> s.artist.lowercase().contains(lowerQuery) } }
+                                    .sortedBy { it.first }
+                            }
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(vertical = 8.dp)
@@ -808,7 +812,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
 
                         4 -> {
-                            val artistGroups = remember(allSongs) { allSongs.groupBy { it.artist }.toList().sortedBy { it.first } }
+                            val lowerQuery = searchQuery.lowercase().trim()
+                            val artistGroups = remember(allSongs, lowerQuery) {
+                                allSongs.groupBy { it.artist }
+                                    .toList()
+                                    .filter { it.first.lowercase().contains(lowerQuery) }
+                                    .sortedBy { it.first }
+                            }
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(vertical = 8.dp)
@@ -848,8 +858,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                             )
                                         }
                                     } else {
+                                        val lowerQuery = searchQuery.lowercase().trim()
+                                        val filteredPlaylists = remember(allPlaylists, lowerQuery) {
+                                            if (lowerQuery.isEmpty()) allPlaylists
+                                            else allPlaylists.filter { it.name.lowercase().contains(lowerQuery) }
+                                        }
                                         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            items(allPlaylists) { playlist ->
+                                            items(filteredPlaylists) { playlist ->
                                                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                                                 PlaylistRow(
                                                     name = playlist.name,

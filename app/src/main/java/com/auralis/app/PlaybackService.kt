@@ -38,31 +38,61 @@ class PlaybackService : MediaSessionService() {
         var instance: PlaybackService? = null
         private val _bitPerfectState = MutableStateFlow(false)
         val bitPerfectState: StateFlow<Boolean> = _bitPerfectState.asStateFlow()
+
+        @Volatile
+        var isCrossfading = false
+
+        @Volatile
+        var targetVolume = 1.0f
     }
 
     private var mediaSession: MediaSession? = null
     private lateinit var audioManager: AudioManager
     private var isCurrentlyBitPerfect: Boolean = false
     private var player: ExoPlayer? = null
+    private var player2: ExoPlayer? = null
+    private var isUsingPlayer2 = false
+    private var isShadowPreloading = false
+    private var preloadedNextIndex = -1
+
+    private val crossfadeHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val crossfadeCheckRunnable = object : Runnable {
+        override fun run() {
+            try {
+                checkCrossfadeTransition()
+            } catch (e: Exception) {
+                Log.e("Auralis-Fade", "🔥 轮询引擎崩溃: ${e.message}", e)
+            } finally {
+                crossfadeHandler.postDelayed(this, 500)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        isCrossfading = false
+        isUsingPlayer2 = false
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-
         val renderersFactory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink {
-                // 1. 生成官方原始的主水管（绝对无损的 Float 管道）
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParams: Boolean
+            ): AudioSink {
                 val originalSink = DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(true) // 👈 誓死保卫 32-bit 极致音质！
+                    .setEnableFloatOutput(true)
                     .build()
-                // 2. 给主水管套上我们的“透明监控外壳”，瞒天过海！
                 return VisualizerInterceptingAudioSink(originalSink)
             }
         }
 
-        val loadControl = DefaultLoadControl.Builder()
+        val loadControl1 = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(50000, 100000, 2500, 5000).build()
+
+        // 👇 给影子播放器的专属缓冲控制器（不能共享！）
+        val loadControl2 = DefaultLoadControl.Builder()
             .setBufferDurationsMs(50000, 100000, 2500, 5000).build()
 
         val audioAttributes = AudioAttributes.Builder()
@@ -71,19 +101,22 @@ class PlaybackService : MediaSessionService() {
             .setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_AUTO)
             .build()
 
-        val builtPlayer = ExoPlayer.Builder(this, renderersFactory)
-            .setAudioAttributes(audioAttributes, true)
-            .setLoadControl(loadControl)
-            .build()
+        player = createPlayer(renderersFactory, audioAttributes, loadControl1)
+        player2 = createPlayer(renderersFactory, audioAttributes, loadControl2)
 
-        // 👇 云糯修复：添加底层监听器，一旦发声瞬间捕获真实的 AudioSessionId！
+        val builtPlayer = player!!
+
         builtPlayer.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(sessionId: Int) {
                 audioSessionId = sessionId
             }
         })
+        player2?.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(sessionId: Int) {
+                audioSessionId = sessionId
+            }
+        })
 
-        player = builtPlayer
         audioSessionId = builtPlayer.audioSessionId
 
         val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
@@ -103,26 +136,205 @@ class PlaybackService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, builtPlayer)
             .setSessionActivity(sessionActivityPendingIntent)
+            .setCallback(CustomSessionCallback())
             .build()
 
         val notificationProvider = object : DefaultMediaNotificationProvider(this) {
-            override fun getMediaButtons(session: MediaSession, playerCommands: Player.Commands, customLayout: ImmutableList<CommandButton>, showPauseButton: Boolean): ImmutableList<CommandButton> {
+            override fun getMediaButtons(
+                session: MediaSession,
+                playerCommands: Player.Commands,
+                customLayout: ImmutableList<CommandButton>,
+                showPauseButton: Boolean
+            ): ImmutableList<CommandButton> {
                 return ImmutableList.copyOf(
                     super.getMediaButtons(session, playerCommands, customLayout, showPauseButton)
-                        .filter { it.playerCommand != Player.COMMAND_SEEK_FORWARD && it.playerCommand != Player.COMMAND_SEEK_BACK }
+                        .filter {
+                            it.playerCommand != Player.COMMAND_SEEK_FORWARD &&
+                                    it.playerCommand != Player.COMMAND_SEEK_BACK
+                        }
                 )
             }
         }
         notificationProvider.setSmallIcon(R.drawable.ic_notification_logo)
         setMediaNotificationProvider(notificationProvider)
+
+        crossfadeHandler.post(crossfadeCheckRunnable)
     }
 
+    private fun createPlayer(
+        renderersFactory: DefaultRenderersFactory,
+        audioAttributes: AudioAttributes,
+        loadControl: DefaultLoadControl
+    ): ExoPlayer {
+        return ExoPlayer.Builder(this, renderersFactory)
+            .setAudioAttributes(audioAttributes, true)
+            .setLoadControl(loadControl)
+            .build()
+    }
+
+    private fun checkCrossfadeTransition() {
+        if (isCurrentlyBitPerfect) return
+
+        val mainPlayer = if (isUsingPlayer2) player2 else player
+        val shadowPlayer = if (isUsingPlayer2) player else player2
+
+        if (mainPlayer == null || shadowPlayer == null) return
+        if (!mainPlayer.isPlaying) return
+
+        val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+        val crossfadeSecs = prefs.getFloat("crossfade_duration", 0f)
+        if (crossfadeSecs <= 0f) return
+
+        val crossfadeMs = (crossfadeSecs * 1000).toLong()
+        val duration = mainPlayer.duration
+        val position = mainPlayer.currentPosition
+
+        // 🛡️ 解锁逻辑
+        if (PlaybackService.isCrossfading) {
+            if (duration <= 0 || position < duration - crossfadeMs - 2000) {
+                PlaybackService.isCrossfading = false
+            } else {
+                return
+            }
+        }
+
+        val timeRemaining = duration - position
+
+        // 🚨 防错机制：如果用户手动切歌导致列表变了，废弃掉之前的预加载
+        if (isShadowPreloading && preloadedNextIndex != mainPlayer.nextMediaItemIndex) {
+            isShadowPreloading = false
+            shadowPlayer.stop()
+            shadowPlayer.clearMediaItems()
+        }
+
+        // 🚀 阶段 1：提前 15 秒让影子播放器在后台悄悄缓冲！
+        val preloadTriggerMs = crossfadeMs + 15000L
+        if (timeRemaining <= preloadTriggerMs && timeRemaining > crossfadeMs && mainPlayer.hasNextMediaItem() && !isShadowPreloading) {
+            Log.i("Auralis-Fade", "⏳ 提前缓冲！剩余时间: ${timeRemaining}ms，开始加载下一首")
+            isShadowPreloading = true
+            preloadedNextIndex = mainPlayer.nextMediaItemIndex
+
+            val items = mutableListOf<androidx.media3.common.MediaItem>()
+            for (i in 0 until mainPlayer.mediaItemCount) {
+                items.add(mainPlayer.getMediaItemAt(i))
+            }
+
+            shadowPlayer.repeatMode = mainPlayer.repeatMode
+            shadowPlayer.shuffleModeEnabled = mainPlayer.shuffleModeEnabled
+            shadowPlayer.setMediaItems(items, preloadedNextIndex, 0L)
+            shadowPlayer.setAudioAttributes(shadowPlayer.audioAttributes, true)
+            shadowPlayer.volume = 0f
+            shadowPlayer.prepare()
+            shadowPlayer.pause() // 重点：只缓冲，不播放！
+            return
+        }
+
+        // 🚀 阶段 2：精确到达倒数 5 秒，准时触发淡入淡出！
+        if (timeRemaining > 0 && timeRemaining <= crossfadeMs && mainPlayer.hasNextMediaItem() && !PlaybackService.isCrossfading) {
+            PlaybackService.isCrossfading = true
+            isShadowPreloading = false // 消耗掉预加载状态
+            val startVolume = mainPlayer.volume
+
+            val startCrossfadeRunnable = Runnable {
+                Log.i("Auralis-Fade", "🔀 准时启动 ${crossfadeSecs}s 淡入淡出！")
+                isUsingPlayer2 = !isUsingPlayer2
+                mediaSession?.player = shadowPlayer
+
+                val currentIndex = mainPlayer.currentMediaItemIndex
+                if (currentIndex + 1 < mainPlayer.mediaItemCount) {
+                    mainPlayer.removeMediaItems(currentIndex + 1, mainPlayer.mediaItemCount)
+                }
+                mainPlayer.repeatMode = Player.REPEAT_MODE_OFF
+
+                // 剥夺焦点，防止安卓系统把逐渐没声的播放器给掐了
+                mainPlayer.setAudioAttributes(mainPlayer.audioAttributes, false)
+
+                shadowPlayer.volume = 0f
+                shadowPlayer.play()
+
+                startCrossfade(mainPlayer, shadowPlayer, crossfadeMs, startVolume)
+            }
+
+            // 因为提前15秒缓冲了，这里一定能瞬间秒切！
+            if (shadowPlayer.playbackState == Player.STATE_READY) {
+                Log.i("Auralis-Fade", "⚡ 预加载成功，完美秒切！")
+                startCrossfadeRunnable.run()
+            } else {
+                // 极端情况防御（比如用户直接拖动进度条到倒数2秒）：退化为老方法
+                if (shadowPlayer.playbackState == Player.STATE_IDLE) {
+                    val items = mutableListOf<androidx.media3.common.MediaItem>()
+                    for (i in 0 until mainPlayer.mediaItemCount) {
+                        items.add(mainPlayer.getMediaItemAt(i))
+                    }
+                    shadowPlayer.setMediaItems(items, mainPlayer.nextMediaItemIndex, 0L)
+                    shadowPlayer.prepare()
+                }
+                shadowPlayer.addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_READY) {
+                            shadowPlayer.removeListener(this)
+                            startCrossfadeRunnable.run()
+                        }
+                    }
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        shadowPlayer.removeListener(this)
+                        PlaybackService.isCrossfading = false
+                    }
+                })
+            }
+        }
+    }
+
+    private fun startCrossfade(fadeOutPlayer: ExoPlayer, fadeInPlayer: ExoPlayer, durationMs: Long, startVolume: Float) {
+        val startTime = System.currentTimeMillis()
+        val fadeHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+        fadeHandler.post(object : Runnable {
+            override fun run() {
+                val elapsed = System.currentTimeMillis() - startTime
+                val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+
+                val smoothProgress = progress * progress * (3 - 2 * progress)
+
+                fadeOutPlayer.volume = startVolume * (1f - smoothProgress)
+                fadeInPlayer.volume = targetVolume * smoothProgress
+
+                if (progress < 1f) {
+                    fadeHandler.postDelayed(this, 16)
+                } else {
+                    Log.i("Auralis-Fade", "🏁 渐变完美结束，打扫战场")
+                    // 👇 确保新歌在动画结束时绝对达到 100% 音量
+                    fadeInPlayer.volume = targetVolume
+
+                    fadeOutPlayer.pause()
+                    fadeOutPlayer.clearMediaItems()
+                    fadeOutPlayer.setAudioAttributes(fadeOutPlayer.audioAttributes, true)
+                    fadeOutPlayer.volume = targetVolume
+
+                    PlaybackService.isCrossfading = false
+                }
+            }
+        })
+    }
+
+    private inner class CustomSessionCallback : MediaSession.Callback
+
     private fun applyOffloadPreference(targetPlayer: ExoPlayer, enableOffload: Boolean) {
-        val mode = if (enableOffload) TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED else TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+        val mode = if (enableOffload)
+            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+        else
+            TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+
         val offloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
-            .setAudioOffloadMode(mode).setIsGaplessSupportRequired(enableOffload).build()
-        targetPlayer.trackSelectionParameters = targetPlayer.trackSelectionParameters.buildUpon()
-            .setAudioOffloadPreferences(offloadPreferences).build()
+            .setAudioOffloadMode(mode)
+            .setIsGaplessSupportRequired(enableOffload)
+            .build()
+
+        targetPlayer.trackSelectionParameters = targetPlayer.trackSelectionParameters
+            .buildUpon()
+            .setAudioOffloadPreferences(offloadPreferences)
+            .build()
+
         Log.d("Auralis", "Offload 模式: ${if (enableOffload) "已启用" else "已禁用（Bit-perfect 路径）"}")
     }
 
@@ -136,40 +348,77 @@ class PlaybackService : MediaSessionService() {
         if (isCurrentlyBitPerfect || Build.VERSION.SDK_INT < 34) return
         try {
             val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            val usbDac = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET } ?: return
+            val usbDac = devices.firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            } ?: return
+
             val targetSampleRate = resolveBestSampleRate(usbDac, requestedSampleRate)
             val targetEncoding = resolveBestEncoding(usbDac, requestedBitDepth)
 
             val mixerAttributes = AudioMixerAttributes.Builder(
-                android.media.AudioFormat.Builder().setSampleRate(targetSampleRate).setEncoding(targetEncoding).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO).build()
+                android.media.AudioFormat.Builder()
+                    .setSampleRate(targetSampleRate)
+                    .setEncoding(targetEncoding)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO)
+                    .build()
             ).setMixerBehavior(AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT).build()
 
-            val audioAttributes = android.media.AudioAttributes.Builder().setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(android.media.AudioAttributes.USAGE_MEDIA).build()
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .build()
+
             val success = audioManager.setPreferredMixerAttributes(audioAttributes, usbDac, mixerAttributes)
             val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
             if (success) {
                 isCurrentlyBitPerfect = true
                 _bitPerfectState.value = true
-                mainHandler.post { android.widget.Toast.makeText(this, "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz", android.widget.Toast.LENGTH_SHORT).show() }
+                mainHandler.post {
+                    android.widget.Toast.makeText(
+                        this,
+                        "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             } else {
-                mainHandler.post { android.widget.Toast.makeText(this, "DAC 独占失败: 设备不支持该规格", android.widget.Toast.LENGTH_SHORT).show() }
+                mainHandler.post {
+                    android.widget.Toast.makeText(
+                        this,
+                        "DAC 独占失败: 设备不支持该规格",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
-        } catch (e: Exception) { Log.e("Auralis", "激活 USB Bit-perfect 失败: ${e.message}") }
+        } catch (e: Exception) {
+            Log.e("Auralis", "激活 USB Bit-perfect 失败: ${e.message}")
+        }
     }
 
     private fun tryDisableUsbBitPerfect() {
         if (!isCurrentlyBitPerfect || Build.VERSION.SDK_INT < 34) return
         try {
             val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            val usbDac = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+            val usbDac = devices.firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+            }
             if (usbDac != null) {
-                val audioAttributes = android.media.AudioAttributes.Builder().setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).setUsage(android.media.AudioAttributes.USAGE_MEDIA).build()
+                val audioAttributes = android.media.AudioAttributes.Builder()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .build()
                 audioManager.clearPreferredMixerAttributes(audioAttributes, usbDac)
             }
             isCurrentlyBitPerfect = false
             _bitPerfectState.value = false
-            android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(this, "已恢复 Android 系统混音", android.widget.Toast.LENGTH_SHORT).show() }
-        } catch (e: Exception) { Log.e("Auralis", "关闭 USB Bit-perfect 失败: ${e.message}") }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(this, "已恢复 Android 系统混音", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e("Auralis", "关闭 USB Bit-perfect 失败: ${e.message}")
+        }
     }
 
     private fun resolveBestSampleRate(usbDac: AudioDeviceInfo, requested: Int): Int {
@@ -182,50 +431,80 @@ class PlaybackService : MediaSessionService() {
     private fun resolveBestEncoding(usbDac: AudioDeviceInfo, requestedBitDepth: Int): Int {
         val dacEncodings = usbDac.encodings
         val candidates = when {
-            requestedBitDepth >= 32 -> listOf(android.media.AudioFormat.ENCODING_PCM_32BIT, android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED, android.media.AudioFormat.ENCODING_PCM_FLOAT, android.media.AudioFormat.ENCODING_PCM_16BIT)
-            requestedBitDepth >= 24 -> listOf(android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED, android.media.AudioFormat.ENCODING_PCM_FLOAT, android.media.AudioFormat.ENCODING_PCM_16BIT)
-            else -> listOf(android.media.AudioFormat.ENCODING_PCM_16BIT, android.media.AudioFormat.ENCODING_PCM_FLOAT)
+            requestedBitDepth >= 32 -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_32BIT,
+                android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            requestedBitDepth >= 24 -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            else -> listOf(
+                android.media.AudioFormat.ENCODING_PCM_16BIT,
+                android.media.AudioFormat.ENCODING_PCM_FLOAT
+            )
         }
         if (dacEncodings.isEmpty()) return candidates.first()
-        return candidates.firstOrNull { dacEncodings.contains(it) } ?: android.media.AudioFormat.ENCODING_PCM_16BIT
+        return candidates.firstOrNull { dacEncodings.contains(it) }
+            ?: android.media.AudioFormat.ENCODING_PCM_16BIT
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
         instance = null
+        crossfadeHandler.removeCallbacks(crossfadeCheckRunnable)
         tryDisableUsbBitPerfect()
         mediaSession?.player?.release()
         mediaSession?.release()
         mediaSession = null
+        player?.release()
+        player2?.release()
         player = null
+        player2 = null
         super.onDestroy()
     }
 }
+
+// ─── VisualizerData ────────────────────────────────────────────────────────────
 
 object VisualizerData {
     @Volatile var amplitude: Float = 0f
 }
 
-// 👇 终极杀招：直接套壳拦截底层 AudioSink！无论 ExoPlayer 怎么屏蔽都不起作用！
+// ─── VisualizerInterceptingAudioSink ──────────────────────────────────────────
+
 @UnstableApi
-class VisualizerInterceptingAudioSink(private val delegate: androidx.media3.exoplayer.audio.AudioSink) : androidx.media3.exoplayer.audio.AudioSink by delegate {
+class VisualizerInterceptingAudioSink(
+    private val delegate: androidx.media3.exoplayer.audio.AudioSink
+) : androidx.media3.exoplayer.audio.AudioSink by delegate {
+
     private var currentEncoding = androidx.media3.common.C.ENCODING_INVALID
     private var currentChannels = 2
     private var filterStateL = 0.0f
     private var filterStateR = 0.0f
-    private val alphaLpf = 0.15f // 完美的 100Hz 极限低通滤波
+    private val alphaLpf = 0.15f
 
-    override fun configure(inputFormat: androidx.media3.common.Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+    override fun configure(
+        inputFormat: androidx.media3.common.Format,
+        specifiedBufferSize: Int,
+        outputChannels: IntArray?
+    ) {
         currentEncoding = inputFormat.pcmEncoding
         currentChannels = inputFormat.channelCount
         delegate.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
 
-    override fun handleBuffer(buffer: java.nio.ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
+    override fun handleBuffer(
+        buffer: java.nio.ByteBuffer,
+        presentationTimeUs: Long,
+        encodedAccessUnitCount: Int
+    ): Boolean {
         val remaining = buffer.remaining()
         if (remaining > 0 && currentChannels > 0) {
-            // 🚨 强制使用 LITTLE_ENDIAN，彻底解决内存读反变 NaN 的死机 Bug！
             val readBuffer = buffer.asReadOnlyBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN)
             var sumSq = 0.0f
             var count = 0
@@ -291,7 +570,8 @@ class VisualizerInterceptingAudioSink(private val delegate: androidx.media3.exop
                                 intL = readBuffer.getInt()
                                 intR = if (currentChannels > 1) readBuffer.getInt() else intL
                             }
-                            if (currentChannels > 2) readBuffer.position(readBuffer.position() + (currentChannels - 2) * bytesPerSample)
+                            if (currentChannels > 2)
+                                readBuffer.position(readBuffer.position() + (currentChannels - 2) * bytesPerSample)
 
                             val sampleL = intL / maxVal
                             val sampleR = intR / maxVal
@@ -309,14 +589,11 @@ class VisualizerInterceptingAudioSink(private val delegate: androidx.media3.exop
                 if (count > 0) {
                     val rms = kotlin.math.sqrt(sumSq / count).toFloat()
                     if (!rms.isNaN() && !rms.isInfinite()) {
-                        VisualizerData.amplitude = rms // 完美抓取！
+                        VisualizerData.amplitude = rms
                     }
                 }
-            } catch (e: Exception) {
-                // 静默护航，绝不阻碍音乐播放
-            }
+            } catch (e: Exception) { /* 静默忽略音频解析异常 */ }
         }
-        // 👇 数据原封不动交给真正的主水管，100% 绝对无损！
         return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 }
