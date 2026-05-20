@@ -595,13 +595,28 @@ fun FullScreenPlayer(
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val isBitPerfectActive by PlaybackService.bitPerfectState.collectAsState()
+
+                Box(
+                    modifier = Modifier.graphicsLayer {
+                        // 如果开启了独占，让倍速控制栏略微变淡置灰，视觉上提示不可用
+                        alpha = if (isBitPerfectActive) 0.5f else 1.0f
+                    }
+                ) {
                     SpeedControlChip(
-                        playbackSpeed = playbackSpeed,
+                        // 当独占开启时，UI 强制回显 1.0x
+                        playbackSpeed = if (isBitPerfectActive) 1.0f else playbackSpeed,
                         onSpeedSelected = { speed ->
-                            playbackSpeed = speed
-                            mediaController?.setPlaybackSpeed(speed)
+                            if (isBitPerfectActive) {
+                                // 像 EQ 按钮一样弹出 Toast 警告 ⛔
+                                Toast.makeText(context, "Bit-perfect 已开启，硬件直通状态下无法修改倍速哦", Toast.LENGTH_SHORT).show()
+                            } else {
+                                playbackSpeed = speed
+                                mediaController?.playbackParameters = PlaybackParameters(speed, speed)
+                            }
                         }
                     )
+                }
                     PlayerToolChip(
                         label = abLabel,
                         selected = abLoopEnd >= 0,

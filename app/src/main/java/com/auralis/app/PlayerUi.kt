@@ -280,39 +280,56 @@ fun SpeedControlChip(
     onSpeedSelected: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = if (playbackSpeed == playbackSpeed.toLong().toFloat()) {
-        "${playbackSpeed.toInt()}x"
-    } else {
-        "${playbackSpeed}x"
-    }
+    var showDialog by remember { mutableStateOf(false) }
+    val label = if (playbackSpeed == 1.0f) "1.0x" else String.format("%.2fx", playbackSpeed)
 
     Box(modifier = modifier) {
         PlayerToolChip(
             label = label,
             selected = playbackSpeed != 1.0f,
-            onClick = { expanded = true }
+            onClick = { showDialog = true }
         )
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                DropdownMenuItem(
-                    text = {
+
+        if (showDialog) {
+            var tempSpeed by remember { mutableFloatStateOf(playbackSpeed) }
+
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text("播放倍速 (自然变调)", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "${speed}x",
-                            fontWeight = if (playbackSpeed == speed) FontWeight.Bold else FontWeight.Normal,
-                            color = if (playbackSpeed == speed) MaterialTheme.colorScheme.primary
-                            else Color.Unspecified
+                            "当前倍速: ${String.format("%.2fx", tempSpeed)}",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
                         )
-                    },
-                    onClick = {
-                        onSpeedSelected(speed)
-                        expanded = false
+                        Spacer(Modifier.height(16.dp))
+                        Slider(
+                            value = tempSpeed,
+                            onValueChange = {
+                                tempSpeed = it
+                                onSpeedSelected(it) // 实时反馈调节
+                            },
+                            valueRange = 0.5f..2.0f
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "提示：已启用自然变速算法。减速时声音变粗，加速时声音变细，避免了强制保调带来的金属电音，以获得最佳无损音质与纯净听感。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                )
-            }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showDialog = false }) { Text("完成") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        tempSpeed = 1.0f
+                        onSpeedSelected(1.0f)
+                    }) { Text("重置 1.0x") }
+                }
+            )
         }
     }
 }

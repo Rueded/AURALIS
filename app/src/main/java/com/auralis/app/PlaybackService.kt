@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
@@ -83,6 +84,8 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink {
                 val originalSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(true)
+                    // ✨ 修复 1：开启系统底层变速代理，全面兼容 32-bit Float 高清输出
+                    .setEnableAudioTrackPlaybackParams(true)
                     .build()
                 return VisualizerInterceptingAudioSink(originalSink)
             }
@@ -91,7 +94,6 @@ class PlaybackService : MediaSessionService() {
         val loadControl1 = DefaultLoadControl.Builder()
             .setBufferDurationsMs(50000, 100000, 2500, 5000).build()
 
-        // 👇 给影子播放器的专属缓冲控制器（不能共享！）
         val loadControl2 = DefaultLoadControl.Builder()
             .setBufferDurationsMs(50000, 100000, 2500, 5000).build()
 
@@ -189,7 +191,6 @@ class PlaybackService : MediaSessionService() {
         val duration = mainPlayer.duration
         val position = mainPlayer.currentPosition
 
-        // 🛡️ 解锁逻辑
         if (PlaybackService.isCrossfading) {
             if (duration <= 0 || position < duration - crossfadeMs - 2000) {
                 PlaybackService.isCrossfading = false
@@ -200,14 +201,12 @@ class PlaybackService : MediaSessionService() {
 
         val timeRemaining = duration - position
 
-        // 🚨 防错机制：如果用户手动切歌导致列表变了，废弃掉之前的预加载
         if (isShadowPreloading && preloadedNextIndex != mainPlayer.nextMediaItemIndex) {
             isShadowPreloading = false
             shadowPlayer.stop()
             shadowPlayer.clearMediaItems()
         }
 
-        // 🚀 阶段 1：提前 15 秒让影子播放器在后台悄悄缓冲！
         val preloadTriggerMs = crossfadeMs + 15000L
         if (timeRemaining <= preloadTriggerMs && timeRemaining > crossfadeMs && mainPlayer.hasNextMediaItem() && !isShadowPreloading) {
             Log.i("Auralis-Fade", "⏳ 提前缓冲！剩余时间: ${timeRemaining}ms，开始加载下一首")
@@ -221,18 +220,21 @@ class PlaybackService : MediaSessionService() {
 
             shadowPlayer.repeatMode = mainPlayer.repeatMode
             shadowPlayer.shuffleModeEnabled = mainPlayer.shuffleModeEnabled
+
+            // ✨ 修复 2：让淡入淡出的影子播放器无缝继承哥哥当前的倍速/音调
+            shadowPlayer.playbackParameters = mainPlayer.playbackParameters
+
             shadowPlayer.setMediaItems(items, preloadedNextIndex, 0L)
             shadowPlayer.setAudioAttributes(shadowPlayer.audioAttributes, true)
             shadowPlayer.volume = 0f
             shadowPlayer.prepare()
-            shadowPlayer.pause() // 重点：只缓冲，不播放！
+            shadowPlayer.pause()
             return
         }
 
-        // 🚀 阶段 2：精确到达倒数 5 秒，准时触发淡入淡出！
         if (timeRemaining > 0 && timeRemaining <= crossfadeMs && mainPlayer.hasNextMediaItem() && !PlaybackService.isCrossfading) {
             PlaybackService.isCrossfading = true
-            isShadowPreloading = false // 消耗掉预加载状态
+            isShadowPreloading = false
             val startVolume = mainPlayer.volume
 
             val startCrossfadeRunnable = Runnable {
@@ -246,7 +248,6 @@ class PlaybackService : MediaSessionService() {
                 }
                 mainPlayer.repeatMode = Player.REPEAT_MODE_OFF
 
-                // 剥夺焦点，防止安卓系统把逐渐没声的播放器给掐了
                 mainPlayer.setAudioAttributes(mainPlayer.audioAttributes, false)
 
                 shadowPlayer.volume = 0f
@@ -255,12 +256,10 @@ class PlaybackService : MediaSessionService() {
                 startCrossfade(mainPlayer, shadowPlayer, crossfadeMs, startVolume)
             }
 
-            // 因为提前15秒缓冲了，这里一定能瞬间秒切！
             if (shadowPlayer.playbackState == Player.STATE_READY) {
                 Log.i("Auralis-Fade", "⚡ 预加载成功，完美秒切！")
                 startCrossfadeRunnable.run()
             } else {
-                // 极端情况防御（比如用户直接拖动进度条到倒数2秒）：退化为老方法
                 if (shadowPlayer.playbackState == Player.STATE_IDLE) {
                     val items = mutableListOf<androidx.media3.common.MediaItem>()
                     for (i in 0 until mainPlayer.mediaItemCount) {
@@ -303,7 +302,6 @@ class PlaybackService : MediaSessionService() {
                     fadeHandler.postDelayed(this, 16)
                 } else {
                     Log.i("Auralis-Fade", "🏁 渐变完美结束，打扫战场")
-                    // 👇 确保新歌在动画结束时绝对达到 100% 音量
                     fadeInPlayer.volume = targetVolume
 
                     fadeOutPlayer.pause()
@@ -340,7 +338,14 @@ class PlaybackService : MediaSessionService() {
 
     fun applyUsbBitPerfectSetting(enable: Boolean, sampleRate: Int = 0, bitDepth: Int = 0) {
         if (Build.VERSION.SDK_INT < 34) return
-        if (enable) tryEnableUsbBitPerfect(sampleRate, bitDepth) else tryDisableUsbBitPerfect()
+        if (enable) {
+            tryEnableUsbBitPerfect(sampleRate, bitDepth)
+            // ✨ 强刷防护：一旦独占开启，强制将主副播放器的速率拉回原生 1.0x，杜绝硬件直通下的音频冲突
+            player?.playbackParameters = PlaybackParameters.DEFAULT
+            player2?.playbackParameters = PlaybackParameters.DEFAULT
+        } else {
+            tryDisableUsbBitPerfect()
+        }
         player?.let { applyOffloadPreference(it, enableOffload = false) }
     }
 
@@ -469,13 +474,9 @@ class PlaybackService : MediaSessionService() {
     }
 }
 
-// ─── VisualizerData ────────────────────────────────────────────────────────────
-
 object VisualizerData {
     @Volatile var amplitude: Float = 0f
 }
-
-// ─── VisualizerInterceptingAudioSink ──────────────────────────────────────────
 
 @UnstableApi
 class VisualizerInterceptingAudioSink(
@@ -592,7 +593,7 @@ class VisualizerInterceptingAudioSink(
                         VisualizerData.amplitude = rms
                     }
                 }
-            } catch (e: Exception) { /* 静默忽略音频解析异常 */ }
+            } catch (e: Exception) { /* 静默忽略 */ }
         }
         return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }

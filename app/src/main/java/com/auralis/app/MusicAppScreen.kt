@@ -978,11 +978,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     BackHandler(enabled = searchQuery.isNotEmpty() && !showFullScreenPlayer) { searchQuery = "" }
 
     if (showSleepTimerDialog) {
+        var customMinutes by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showSleepTimerDialog = false },
             title = { Text("睡眠定时器", fontWeight = FontWeight.Bold) },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     if (sleepTimerSeconds > 0) {
                         Text("当前：${sleepTimerSeconds / 60}分${sleepTimerSeconds % 60}秒后暂停", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(4.dp))
@@ -994,9 +995,40 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             Text(label, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    // 👇 新增：自定义分钟输入框
+                    OutlinedTextField(
+                        value = customMinutes,
+                        onValueChange = {
+                            if (it.isEmpty() || it.all { char -> char.isDigit() }) customMinutes = it
+                        },
+                        label = { Text("自定义时间 (分钟)") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val mins = customMinutes.toLongOrNull()
+                            if (mins != null && mins > 0) {
+                                sleepTimerSeconds = mins * 60L
+                                showSleepTimerDialog = false
+                            } else {
+                                Toast.makeText(context, "请输入有效的分钟数", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = customMinutes.isNotEmpty()
+                    ) {
+                        Text("确认自定义")
+                    }
                 }
             },
-            confirmButton = { TextButton(onClick = { showSleepTimerDialog = false }) { Text("取消") } }
+            confirmButton = { TextButton(onClick = { showSleepTimerDialog = false }) { Text("关闭") } }
         )
     }
 
