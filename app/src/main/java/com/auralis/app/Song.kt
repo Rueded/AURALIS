@@ -16,6 +16,7 @@ data class Song(
     val size: Long = 0L,
     val dateModified: Long = 0L,
     val albumId: Long = 0L,
+    val album: String = "未知专辑",
 
     // 👇 数据库专属：为未来的“听歌大数据”埋下伏笔！
     val isFavorite: Boolean = false, // 是否红心喜欢
@@ -52,4 +53,12 @@ data class Playlist(
 data class PlaylistSong(
     val playlistId: Long,
     val songPath: String
+)
+
+// 👇 均衡器预设表
+@Entity(tableName = "eq_presets")
+data class EqPreset(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val bandLevels: String // 存储为逗号分隔的字符串，例如 "100,200,-50,0,300"
 )

@@ -66,3 +66,15 @@ interface SongDao {
     @Query("DELETE FROM playlist_songs WHERE songPath = :songPath")
     suspend fun removeSongFromAllPlaylists(songPath: String)
 }
+
+@Dao
+interface EqPresetDao {
+    @Query("SELECT * FROM eq_presets ORDER BY name ASC")
+    fun getAllPresets(): Flow<List<EqPreset>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPreset(preset: EqPreset)
+
+    @Query("DELETE FROM eq_presets WHERE id = :id")
+    suspend fun deletePreset(id: Int)
+}

@@ -8,13 +8,14 @@ import androidx.room.RoomDatabase
 // 👇 核心修复 1：把刚刚新建的三张表全部注册进花名册！
 // 👇 核心修复 2：version 从 1 改成 2！告诉系统数据库升级了！
 @Database(
-    entities = [ Song::class, PlayHistory::class, Playlist::class, PlaylistSong::class ],
-    version = 3, // 👇 必须加 1，触发重建！
+    entities = [ Song::class, PlayHistory::class, Playlist::class, PlaylistSong::class, EqPreset::class ],
+    version = 5, // 👇 升级到 5
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun songDao(): SongDao
+    abstract fun eqPresetDao(): EqPresetDao
 
     companion object {
         @Volatile

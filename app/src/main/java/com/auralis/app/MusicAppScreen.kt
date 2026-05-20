@@ -210,7 +210,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     }
 
     // 👇 修改 1：引入 PagerState，废弃原本的 selectedTab
-    val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "歌手聚合", "我的歌单")
+    val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "专辑列表", "歌手聚合", "我的歌单")
     val pagerState = rememberPagerState(pageCount = { tabs.size })
 
     val qualityKeywordMap = mapOf(
@@ -221,7 +221,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         "spatial" to listOf("5.1", "7.1", "atmos", "spatial"),
         "5.1" to listOf("5.1"), "7.1" to listOf("7.1"),
         "atmos" to listOf("atmos"), "hq" to listOf(".mp3"),
-        "dsd" to listOf(".dsf", ".dff")
+        "dsd" to listOf(".dsf", ".dff"),
+        "24bit" to listOf("24-bit", "24bit"), "32bit" to listOf("32-bit", "32bit")
     )
 
     var showSettingsScreen by remember { mutableStateOf(false) }
@@ -663,7 +664,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 val filtered = if (lowerQuery.isEmpty()) currentBaseList else {
                                     val extraKeywords = qualityKeywordMap[lowerQuery] ?: listOf(lowerQuery)
                                     currentBaseList.filter { song ->
-                                        song.title.contains(lowerQuery, true) || song.artist.contains(lowerQuery, true) || extraKeywords.any { kw -> song.data.lowercase().contains(kw) }
+                                        song.title.contains(lowerQuery, true) || 
+                                        song.artist.contains(lowerQuery, true) || 
+                                        song.album.contains(lowerQuery, true) ||
+                                        (lowerQuery == "24-bit" && song.bitDepth >= 24) ||
+                                        (lowerQuery == "hi-res" && (song.bitDepth >= 24 || song.samplingRate > 48000)) ||
+                                        extraKeywords.any { kw -> song.data.lowercase().contains(kw) }
                                     }
                                 }
                                 val sorted = when (sortType) { "Date" -> filtered.sortedBy { it.dateModified }; "Size" -> filtered.sortedBy { it.size }; else -> filtered.sortedBy { it.title } }
@@ -782,6 +788,26 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
 
                         3 -> {
+                            val albumGroups = remember(allSongs) { allSongs.groupBy { it.album }.toList().sortedBy { it.first } }
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                items(albumGroups) { (albumName, songs) ->
+                                    AlbumRow(
+                                        albumName = albumName,
+                                        artistName = songs.firstOrNull()?.artist ?: "未知歌手",
+                                        songCount = songs.size,
+                                        onClick = {
+                                            searchQuery = albumName
+                                            scope.launch { pagerState.animateScrollToPage(0) }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        4 -> {
                             val artistGroups = remember(allSongs) { allSongs.groupBy { it.artist }.toList().sortedBy { it.first } }
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
@@ -800,7 +826,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             }
                         }
 
-                        4 -> {
+                        5 -> {
                             if (selectedPlaylist == null) {
                                 Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                                     FilledTonalButton(
@@ -844,6 +870,22 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                         IconButton(onClick = { selectedPlaylist = null }) { Icon(Icons.Filled.ArrowBack, null) }
                                         Spacer(Modifier.width(8.dp))
                                         Text(selectedPlaylist!!.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        
+                                        // 👇 导出歌单按钮
+                                        IconButton(onClick = {
+                                            scope.launch {
+                                                val file = MusicUtils.exportPlaylistToM3U(context, selectedPlaylist!!.name, playlistSongs)
+                                                if (file != null) {
+                                                    Toast.makeText(context, "已导出至 Download/Auralis/Playlists: ${file.name}", Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    Toast.makeText(context, "导出失败", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        })
+ {
+                                            Icon(Icons.Default.FileDownload, "导出歌单")
+                                        }
+
                                         Text("共 ${playlistSongs.size} 首", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                                     }
                                     HorizontalDivider()

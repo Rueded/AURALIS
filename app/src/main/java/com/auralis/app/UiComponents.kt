@@ -43,11 +43,11 @@ fun HomeAmbientBackground(
     val primary = palette?.primary ?: MaterialTheme.colorScheme.primary
     val secondary = palette?.secondary ?: MaterialTheme.colorScheme.secondary
     val accent = palette?.accent ?: MaterialTheme.colorScheme.tertiary
-    
+
     val animatedPrimary by animateColorAsState(primary, tween(1000, easing = LinearOutSlowInEasing), label = "hPrimary")
     val animatedSecondary by animateColorAsState(secondary, tween(1000, easing = LinearOutSlowInEasing), label = "hSecondary")
     val animatedAccent by animateColorAsState(accent, tween(1000, easing = LinearOutSlowInEasing), label = "hAccent")
-    
+
     val surface = MaterialTheme.colorScheme.background
 
     Box(
@@ -422,6 +422,57 @@ fun TopSongRow(
                     fontWeight = FontWeight.SemiBold
                 )
             }
+        }
+    }
+}
+
+/** 专辑列表卡片 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AlbumRow(
+    albumName: String,
+    artistName: String,
+    songCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(primary.copy(0.35f), MaterialTheme.colorScheme.tertiary.copy(0.25f))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Album,
+                    null,
+                    tint = primary,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(albumName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("$artistName · $songCount 首歌曲", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
     }
 }

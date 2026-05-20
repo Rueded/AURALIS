@@ -2,200 +2,93 @@ package com.auralis.app
 
 import android.Manifest
 import android.content.ComponentName
-import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.media.audiofx.Equalizer
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.util.LruCache
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import com.auralis.app.ui.theme.AuralisTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.PlaybackParameters
-import androidx.media3.common.Player
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
-import androidx.palette.graphics.Palette
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
-import java.util.Locale
 import kotlin.math.roundToInt
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.ConcurrentHashMap
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.text.style.TextOverflow
-import android.media.AudioManager
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.geometry.Offset
-import androidx.activity.result.IntentSenderRequest
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import kotlinx.coroutines.isActive // 确保引入了 isActive
-import kotlinx.coroutines.flow.first
-import kotlin.math.pow
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域被识别
-// 如果 drawRect 还是红的，补上这个：
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import android.util.Log
-import androidx.compose.material.icons.outlined.DeleteOutline
-import com.auralis.app.PlayerStateHolder.dominantColor
-import com.auralis.app.ui.theme.AuralisTheme
-import kotlin.apply
 
-
-// ==========================================
-// MainActivity
-// ==========================================
-private fun audioReadPermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_AUDIO
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
+import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : ComponentActivity() {
-    val shouldOpenPlayer = mutableStateOf(false)
     val audioPermissionGranted = mutableStateOf(false)
 
-    private val requestPermissionsLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-            audioPermissionGranted.value = hasAudioReadPermission()
-            results.forEach { (perm, granted) ->
-                Log.d("Auralis", "$perm: ${if (granted) "已授予" else "已拒绝"}")
-            }
-        }
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        audioPermissionGranted.value = hasPermission()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        audioPermissionGranted.value = hasAudioReadPermission()
-        handleIntent(intent)
+        
+        audioPermissionGranted.value = hasPermission()
+
+        // 🚨 关键：如果是从通知点击进来的，要能识别到
+        val shouldOpenPlayer = mutableStateOf(false)
+        if (intent?.action == "OPEN_PLAYER") {
+            shouldOpenPlayer.value = true
+        }
+
         setContent {
-           ThemeManager.loadSaved(this)
             AuralisTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                     MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
-                 }
-            }
-        }
-        requestRuntimePermissionsIfNeeded()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        audioPermissionGranted.value = hasAudioReadPermission()
-    }
-
-    private fun hasAudioReadPermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, audioReadPermission()) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-
-    private fun requestRuntimePermissionsIfNeeded() {
-        val needed = buildList {
-            if (!hasAudioReadPermission()) add(audioReadPermission())
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS)
-                    != android.content.pm.PackageManager.PERMISSION_GRANTED
-                ) {
-                    add(Manifest.permission.POST_NOTIFICATIONS)
+                    MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
                 }
             }
-            if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                add(Manifest.permission.RECORD_AUDIO)
-            }
-        }
-        if (needed.isNotEmpty()) {
-            requestPermissionsLauncher.launch(needed.toTypedArray())
         }
     }
 
     fun requestRuntimePermissions() {
-        requestRuntimePermissionsIfNeeded()
+        val permissions = mutableListOf(audioReadPermission())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissions.add(Manifest.permission.RECORD_AUDIO)
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
-    override fun onNewIntent(intent: Intent, caller: android.app.ComponentCaller) {
-        super.onNewIntent(intent, caller)
-        handleIntent(intent)
+    private fun audioReadPermission(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
     }
 
-    private fun handleIntent(intent: Intent) {
-        if (intent.action == "OPEN_PLAYER_FULLSCREEN") shouldOpenPlayer.value = true
+    private fun hasPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, audioReadPermission()) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 }
 
@@ -205,6 +98,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun EqDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val db = remember { AppDatabase.getDatabase(context) }
+    val customPresets by db.eqPresetDao().getAllPresets().collectAsState(initial = emptyList())
+
     val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
     val isBitPerfect = prefs.getBoolean("enable_bit_perfect", false)
 
@@ -249,13 +146,56 @@ fun EqDialog(onDismiss: () -> Unit) {
     val numPresets = eq.numberOfPresets.toInt()
     val presetNames = remember { (0 until numPresets).map { eq.getPresetName(it.toShort()) } }
 
+    var showSaveNameDialog by remember { mutableStateOf(false) }
+    var saveNameText by remember { mutableStateOf("") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("发烧级均衡器", fontWeight = FontWeight.Bold) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("发烧级均衡器", fontWeight = FontWeight.Bold)
+                IconButton(onClick = { showSaveNameDialog = true }) {
+                    Icon(Icons.Default.Save, "保存预设", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                // 👇 自定义预设区域
+                if (customPresets.isNotEmpty()) {
+                    Text("我的预设", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(customPresets) { preset ->
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    val levels = preset.bandLevels.split(",").map { it.toShort() }
+                                    levels.forEachIndexed { idx, level ->
+                                        if (idx < numBands) {
+                                            eq.setBandLevel(idx.toShort(), level)
+                                            bandLevels[idx] = level.toInt()
+                                        }
+                                    }
+                                },
+                                label = { Text(preset.name, fontSize = 11.sp) },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        null,
+                                        modifier = Modifier.size(14.dp).clickable {
+                                            scope.launch { db.eqPresetDao().deletePreset(preset.id) }
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 if (presetNames.isNotEmpty()) {
-                    Text("预设方案", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text("系统方案", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(presetNames) { idx, name ->
@@ -304,7 +244,33 @@ fun EqDialog(onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
         dismissButton = { TextButton(onClick = { repeat(numBands) { i -> eq.setBandLevel(i.toShort(), 0); bandLevels[i] = 0 } }) { Text("重置") } }
     )
-}
 
-// ==========================================
-// MusicAppScreen
+    if (showSaveNameDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveNameDialog = false },
+            title = { Text("保存预设") },
+            text = {
+                OutlinedTextField(
+                    value = saveNameText,
+                    onValueChange = { saveNameText = it },
+                    label = { Text("预设名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (saveNameText.isNotBlank()) {
+                        scope.launch {
+                            val levelsStr = bandLevels.joinToString(",")
+                            db.eqPresetDao().insertPreset(EqPreset(name = saveNameText, bandLevels = levelsStr))
+                            showSaveNameDialog = false
+                            saveNameText = ""
+                        }
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { TextButton(onClick = { showSaveNameDialog = false }) { Text("取消") } }
+        )
+    }
+}

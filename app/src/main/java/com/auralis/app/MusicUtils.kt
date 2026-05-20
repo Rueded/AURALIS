@@ -28,7 +28,8 @@ object MusicUtils {
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.SIZE,
                 MediaStore.Audio.Media.DATE_MODIFIED,
-                MediaStore.Audio.Media.ALBUM_ID
+                MediaStore.Audio.Media.ALBUM_ID,
+                MediaStore.Audio.Media.ALBUM
             )
 
             var selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -51,6 +52,7 @@ object MusicUtils {
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
                 val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
 
                 while (cursor.moveToNext()) {
                     val data = cursor.getString(dataCol) ?: continue
@@ -63,6 +65,7 @@ object MusicUtils {
                     val id = cursor.getLong(idCol)
                     var title = cursor.getString(titleCol) ?: "未知歌名"
                     var artist = cursor.getString(artistCol) ?: "未知歌手"
+                    var album = cursor.getString(albumCol) ?: "未知专辑"
                     var duration = cursor.getLong(durationCol)
                     var size = cursor.getLong(sizeCol)
                     val dateModified = cursor.getLong(dateCol)
@@ -102,6 +105,9 @@ object MusicUtils {
                             if (title == "未知歌名" || title.contains("unknown", true)) {
                                 title = tag?.getFirst(org.jaudiotagger.tag.FieldKey.TITLE) ?: file.nameWithoutExtension
                             }
+                            if (album == "未知专辑" || album.contains("unknown", true)) {
+                                album = tag?.getFirst(org.jaudiotagger.tag.FieldKey.ALBUM) ?: "未知专辑"
+                            }
 
                             // 解析 ReplayGain (反射避错版)
                             if (tag != null) {
@@ -136,7 +142,7 @@ object MusicUtils {
 
                         songList.add(
                             Song(
-                                data = data, id = id, title = title, artist = artist,
+                                data = data, id = id, title = title, artist = artist, album = album,
                                 duration = duration, size = size, dateModified = dateModified,
                                 albumId = albumId, replayGain = gain, bitDepth = bits, samplingRate = sampleRate
                             )
@@ -172,6 +178,37 @@ object MusicUtils {
                 }
             } catch (e: Exception) {
                 Log.e("MusicApp", "幽灵清理出错: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 将歌单导出为标准的 .m3u8 文件，保存到公共 Download 目录
+     */
+    suspend fun exportPlaylistToM3U(context: Context, playlistName: String, songs: List<Song>): File? {
+        return withContext(Dispatchers.IO) {
+            try {
+                // 1. 准备公共 Download 目录下的子目录
+                val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val exportDir = File(downloadDir, "Auralis/Playlists")
+                if (!exportDir.exists()) exportDir.mkdirs()
+
+                // 2. 格式化文件名 (去掉非法字符)
+                val safeName = playlistName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                val file = File(exportDir, "$safeName.m3u8")
+
+                // 3. 写入内容 (UTF-8)
+                file.bufferedWriter(Charsets.UTF_8).use { writer ->
+                    writer.write("#EXTM3U\n")
+                    songs.forEach { song ->
+                        writer.write("#EXTINF:${song.duration / 1000},${song.artist} - ${song.title}\n")
+                        writer.write("${song.data}\n")
+                    }
+                }
+                file
+            } catch (e: Exception) {
+                Log.e("MusicUtils", "导出歌单失败: ${e.message}")
+                null
             }
         }
     }
