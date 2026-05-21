@@ -39,6 +39,17 @@ object PlayerStateHolder {
     private val _currentPath = MutableStateFlow("")
     val currentPathState: StateFlow<String> = _currentPath.asStateFlow()
 
+    private val _openPlayerRequest = MutableStateFlow(false)
+    val openPlayerRequest: StateFlow<Boolean> = _openPlayerRequest.asStateFlow()
+
+    fun requestOpenPlayer() {
+        _openPlayerRequest.value = true
+    }
+
+    fun consumeOpenPlayerRequest() {
+        _openPlayerRequest.value = false
+    }
+
     @Volatile
     private var loadGeneration = 0
 

@@ -113,6 +113,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
 import androidx.compose.material.icons.outlined.DeleteOutline
+import com.auralis.app.AudioQualityAnalysis
+import com.auralis.app.VisualizerData
 import com.auralis.app.PlayerStateHolder.dominantColor
 import com.auralis.app.ui.theme.AuralisTheme
 import kotlin.apply
@@ -179,6 +181,49 @@ fun FullScreenPlayer(
         var showLyrics by remember { mutableStateOf(false) }
         var isFullscreenLyrics by remember { mutableStateOf(false) }
         var lyricsSource by remember { mutableStateOf(LyricsSource.LOCAL) }
+        var showDeleteLyricsConfirm by remember { mutableStateOf(false) }
+        var showRefreshLyricsConfirm by remember { mutableStateOf(false) }
+        val prefKeySkipDelete  = "skip_delete_lyrics_confirm"
+        val prefKeySkipRefresh = "skip_refresh_lyrics_confirm"
+        var skipDeleteConfirm  by remember { mutableStateOf(prefs.getBoolean(prefKeySkipDelete,  false)) }
+        var skipRefreshConfirm by remember { mutableStateOf(prefs.getBoolean(prefKeySkipRefresh, false)) }
+
+        var coverRefreshNonce by remember { mutableIntStateOf(0) }
+        var coverForceNetwork by remember { mutableStateOf(false) }
+
+        val doDeleteLyrics: () -> Unit = {
+            scope.launch(Dispatchers.IO) {
+                OnlineLyricsRepository.banCurrentLyrics(audioPath, context)
+                OnlineLyricsRepository.clearCache(audioPath, context)
+                CoverArtCache.invalidate(context, audioPath)
+                withContext(Dispatchers.Main) {
+                    lrcLines = emptyList()
+                    lyricsSource = LyricsSource.LOCAL
+                    coverForceNetwork = true
+                    coverRefreshNonce++
+                    android.widget.Toast.makeText(context, "歌词与封面缓存已清除，下次刷新将跳过此结果", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        val doRefreshLyrics: () -> Unit = {
+            scope.launch(Dispatchers.IO) {
+                val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                val safeTitle  = dbSong?.title  ?: title
+                val safeArtist = dbSong?.artist ?: artist
+                val result = OnlineLyricsRepository.refreshFromNetwork(
+                    audioPath = audioPath,
+                    title = safeTitle,
+                    artist = safeArtist,
+                    context = context
+                )
+                withContext(Dispatchers.Main) {
+                    lrcLines = result.lines
+                    lyricsSource = result.source
+                    android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
         val enableOnlineLyrics = remember {
             context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
                 .getBoolean("enable_online_lyrics", true)
@@ -190,8 +235,6 @@ fun FullScreenPlayer(
         var showPlaylistSheet by remember { mutableStateOf(false) }
         var showInfoDialog by remember { mutableStateOf(false) }
         var showEqDialog by remember { mutableStateOf(false) }
-        var coverRefreshNonce by remember { mutableIntStateOf(0) }
-        var coverForceNetwork by remember { mutableStateOf(false) }
 
         var lyricsFontSize by remember { mutableFloatStateOf(prefs.getFloat("lyrics_font_size", 20f)) }
 
@@ -202,6 +245,19 @@ fun FullScreenPlayer(
         var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
         var abLoopStart by remember { mutableLongStateOf(-1L) }
         var abLoopEnd by remember { mutableLongStateOf(-1L) }
+
+        // ── Audio quality badge state ──
+        val qualityAnalysis = remember { mutableStateOf<AudioQualityAnalysis?>(null) }
+        LaunchedEffect(audioPath) {
+            // Poll for quality analysis result (becomes available a few seconds into playback)
+            while (true) {
+                delay(2000)
+                val qa = VisualizerData.qualityAnalysis
+                if (qa != null) {
+                    qualityAnalysis.value = qa
+                }
+            }
+        }
 
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).toFloat()
         var currentVolume by remember {
@@ -878,40 +934,15 @@ fun FullScreenPlayer(
                                 lyricsFontSize = (lyricsFontSize + 2f).coerceAtMost(36f)
                             }) { Text("A+", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                             IconButton(onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    // 为了防止串歌，云糯帮你从数据库里查最准确的名字哦
-                                    val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
-                                    val safeTitle = dbSong?.title ?: title
-                                    val safeArtist = dbSong?.artist ?: artist
-
-                                    val result = OnlineLyricsRepository.refreshFromNetwork(
-                                        audioPath = audioPath,
-                                        title = safeTitle,
-                                        artist = safeArtist,
-                                        context = context
-                                    )
-                                    withContext(Dispatchers.Main) {
-                                        lrcLines = result.lines
-                                        lyricsSource = result.source
-                                        android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                                if (skipRefreshConfirm) doRefreshLyrics()
+                                else showRefreshLyricsConfirm = true
                             }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
                             }
 
                             IconButton(onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    OnlineLyricsRepository.clearCache(audioPath, context)
-                                    CoverArtCache.invalidate(context, audioPath)
-                                    withContext(Dispatchers.Main) {
-                                        lrcLines = emptyList()
-                                        lyricsSource = LyricsSource.LOCAL
-                                        coverForceNetwork = true
-                                        coverRefreshNonce++
-                                        android.widget.Toast.makeText(context, "歌词与封面缓存已清除", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                                if (skipDeleteConfirm) doDeleteLyrics()
+                                else showDeleteLyricsConfirm = true
                             }) {
                                 Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
                             }
@@ -1017,6 +1048,44 @@ fun FullScreenPlayer(
                                     compact = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
+
+                                // ── Audio quality badge (Landscape) ──
+                                qualityAnalysis.value?.let { qa ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .padding(horizontal = 24.dp, vertical = 4.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (qa.isSuspect)
+                                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+                                                else
+                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            )
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (qa.isSuspect) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = if (qa.isSuspect) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = qa.estimatedSource,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (qa.isSuspect) MaterialTheme.colorScheme.onErrorContainer
+                                            else MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "≤ ${qa.detectedCutoffHz / 1000}kHz",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
                                 spec?.let {
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1232,40 +1301,15 @@ fun FullScreenPlayer(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }; IconButton(onClick = {
-                                    scope.launch(Dispatchers.IO) {
-                                        // 为了防止串歌，云糯帮你从数据库里查最准确的名字哦
-                                        val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
-                                        val safeTitle = dbSong?.title ?: title
-                                        val safeArtist = dbSong?.artist ?: artist
-
-                                        val result = OnlineLyricsRepository.refreshFromNetwork(
-                                            audioPath = audioPath,
-                                            title = safeTitle,
-                                            artist = safeArtist,
-                                            context = context
-                                        )
-                                        withContext(Dispatchers.Main) {
-                                            lrcLines = result.lines
-                                            lyricsSource = result.source
-                                            android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
+                                    if (skipRefreshConfirm) doRefreshLyrics()
+                                    else showRefreshLyricsConfirm = true
                                 }) {
                                     Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
                                 }
 
                                 IconButton(onClick = {
-                                    scope.launch(Dispatchers.IO) {
-                                        OnlineLyricsRepository.clearCache(audioPath, context)
-                                        CoverArtCache.invalidate(context, audioPath)
-                                        withContext(Dispatchers.Main) {
-                                            lrcLines = emptyList()
-                                            lyricsSource = LyricsSource.LOCAL
-                                            coverForceNetwork = true
-                                            coverRefreshNonce++
-                                            android.widget.Toast.makeText(context, "歌词与封面缓存已清除", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
+                                    if (skipDeleteConfirm) doDeleteLyrics()
+                                    else showDeleteLyricsConfirm = true
                                 }) {
                                     Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
                                 }
@@ -1503,6 +1547,44 @@ fun FullScreenPlayer(
                                 spec = spec,
                                 onArtistClick = onArtistClick
                             )
+
+                            // ── Audio quality badge (Portrait) ──
+                            qualityAnalysis.value?.let { qa ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (qa.isSuspect)
+                                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+                                            else
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (qa.isSuspect) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = if (qa.isSuspect) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = qa.estimatedSource,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (qa.isSuspect) MaterialTheme.colorScheme.onErrorContainer
+                                        else MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "≤ ${qa.detectedCutoffHz / 1000}kHz",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
                             Spacer(Modifier.height(16.dp))
                             ControlsSection(isLandscapeLayout = false)
                             Spacer(Modifier.height(16.dp))
@@ -1535,6 +1617,86 @@ fun FullScreenPlayer(
             }
         )
         if (showEqDialog) EqDialog(onDismiss = { showEqDialog = false })
+
+        // ── 删除歌词确认弹窗 ──────────────────────────────────────────────────────
+        if (showDeleteLyricsConfirm) {
+            var dontAskAgain by remember { mutableStateOf(false) }
+            AlertDialog(
+                onDismissRequest = { showDeleteLyricsConfirm = false },
+                title = { Text("删除歌词与封面缓存？") },
+                text = {
+                    Column {
+                        Text("此操作会把当前歌词加入黑名单，刷新时将跳过这条结果并尝试获取其他来源。")
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { dontAskAgain = !dontAskAgain }
+                        ) {
+                            Checkbox(checked = dontAskAgain, onCheckedChange = { dontAskAgain = it })
+                            Spacer(Modifier.width(4.dp))
+                            Text("不再弹出确认", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (dontAskAgain) {
+                            prefs.edit().putBoolean(prefKeySkipDelete, true).apply()
+                            skipDeleteConfirm = true
+                        }
+                        showDeleteLyricsConfirm = false
+                        doDeleteLyrics()
+                    }) {
+                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("确认删除")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteLyricsConfirm = false }) { Text("取消") }
+                }
+            )
+        }
+
+        // ── 刷新歌词确认弹窗 ──────────────────────────────────────────────────────
+        if (showRefreshLyricsConfirm) {
+            var dontAskAgain by remember { mutableStateOf(false) }
+            AlertDialog(
+                onDismissRequest = { showRefreshLyricsConfirm = false },
+                title = { Text("重新联网获取歌词？") },
+                text = {
+                    Column {
+                        Text("将清除本地缓存并重新搜索。如已删除过错误歌词，系统会自动跳过被标记的结果。")
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { dontAskAgain = !dontAskAgain }
+                        ) {
+                            Checkbox(checked = dontAskAgain, onCheckedChange = { dontAskAgain = it })
+                            Spacer(Modifier.width(4.dp))
+                            Text("不再弹出确认", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (dontAskAgain) {
+                            prefs.edit().putBoolean(prefKeySkipRefresh, true).apply()
+                            skipRefreshConfirm = true
+                        }
+                        showRefreshLyricsConfirm = false
+                        doRefreshLyrics()
+                    }) {
+                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("确认刷新")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRefreshLyricsConfirm = false }) { Text("取消") }
+                }
+            )
+        }
 
         if (showPlaylistSheet) {
             val playlistState = rememberLazyListState()

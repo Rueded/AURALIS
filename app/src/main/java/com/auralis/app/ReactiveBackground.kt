@@ -62,7 +62,19 @@ private fun rememberAudioAmplitude(isPlaying: Boolean): Float {
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (isActive) {
-                val raw = VisualizerData.amplitude
+                // Read three frequency groups from FFT bands
+                // Bass (0–250 Hz) → bands 0..5 → drives large-scale pulsing
+                val bassEnergy   = VisualizerData.fftBands.slice(0..5).average().toFloat() * 6f
+                // Mid (250Hz–4kHz) → bands 6..45 → drives medium movement
+                val midEnergy    = VisualizerData.fftBands.slice(6..45).average().toFloat() * 4f
+                // Treble (4k–16kHz) → bands 46..110 → drives fine shimmer/sparkle
+                val trebleEnergy = VisualizerData.fftBands.slice(46..110).average().toFloat() * 3f
+
+                // Combine into a single amplitude for places that still need one value
+                val combinedAmp  = (bassEnergy * 0.6f + midEnergy * 0.3f + trebleEnergy * 0.1f)
+                    .coerceIn(0f, 1f)
+
+                val raw = combinedAmp
                 val sens = prefs.getFloat("reactive_sensitivity", 1.5f)
                 movingAverage += 0.05f * (raw - movingAverage)
                 val threshold = movingAverage * 1.10f

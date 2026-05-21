@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
 
         // 🚨 关键：如果是从通知点击进来的，要能识别到
         val shouldOpenPlayer = mutableStateOf(false)
-        if (intent?.action == "OPEN_PLAYER") {
+        if (intent?.action == "OPEN_PLAYER" || intent?.action == "OPEN_PLAYER_FULLSCREEN") {
             shouldOpenPlayer.value = true
         }
 
@@ -89,6 +89,15 @@ class MainActivity : ComponentActivity() {
     private fun hasPermission(): Boolean {
         return ContextCompat.checkSelfPermission(this, audioReadPermission()) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == "OPEN_PLAYER" || intent.action == "OPEN_PLAYER_FULLSCREEN") {
+            // Notify Compose via the global flag in PlayerStateHolder
+            PlayerStateHolder.requestOpenPlayer()
+        }
     }
 }
 

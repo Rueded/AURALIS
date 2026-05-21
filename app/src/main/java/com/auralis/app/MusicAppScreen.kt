@@ -209,6 +209,14 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         }
     }
 
+    val openPlayerRequest by PlayerStateHolder.openPlayerRequest.collectAsState()
+    LaunchedEffect(openPlayerRequest) {
+        if (openPlayerRequest) {
+            if (currentTitle != null) showFullScreenPlayer = true
+            PlayerStateHolder.consumeOpenPlayerRequest()
+        }
+    }
+
     // 👇 修改 1：引入 PagerState，废弃原本的 selectedTab
     val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "专辑列表", "歌手聚合", "我的歌单")
     val pagerState = rememberPagerState(pageCount = { tabs.size })
@@ -437,6 +445,21 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             mediaController = controller
             repeatMode = controller.repeatMode
             shuffleMode = controller.shuffleModeEnabled
+
+            // ★ Immediately sync current playback state (e.g. after process kill & reopen)
+            controller.currentMediaItem?.let { item ->
+                currentAudioPath = item.mediaId
+                PlayerStateHolder.onTrackChanged(item.mediaId)
+            }
+            controller.mediaMetadata.let { meta ->
+                if (meta.title != null) {
+                    currentTitle  = meta.title.toString()
+                    currentArtist = meta.artist?.toString()
+                    currentArtwork = meta.artworkData
+                }
+            }
+            isPlaying = controller.isPlaying
+
             controller.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                     currentTitle   = mediaMetadata.title?.toString()
@@ -461,7 +484,17 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
 
-                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    if (!playing && PlaybackService.isCrossfading) {
+                        // During crossfade the old player stops — debounce to avoid false pause icon
+                        scope.launch {
+                            delay(300)
+                            isPlaying = mediaController?.isPlaying ?: false
+                        }
+                    } else {
+                        isPlaying = playing
+                    }
+                }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentAudioPath = mediaItem?.mediaId ?: ""
                     PlayerStateHolder.onTrackChanged(currentAudioPath)
