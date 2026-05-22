@@ -274,17 +274,24 @@ fun FullScreenPlayer(
 
         val dynamicLyricActiveColor = remember(animatedDominantColor, albumPalette) {
             val luminance = animatedDominantColor.luminance()
+
             if (luminance > 0.5f) {
-                // ✨【浅色高雅背景】
-                // 核心高奢算法：利用 Compose 原生 lerp 函数，将专辑主色（primary）向暗曜岩黑（0xFF1A1D1A）深层晕染 85%
-                // 这样能诞生出带有当前专辑独特基因的「高定深邃墨色」，具备完美的对比度与纸张印刷般的内敛质感
-                val primaryColor = albumPalette?.primary ?: Color(0xFF2C302E)
-                androidx.compose.ui.graphics.lerp(primaryColor, Color(0xFF1A1D1A), 0.85f)
+                // ✨【浅色背景】
+                // 保留专辑主色，但轻微向白色混合
+                // 这样既能维持专辑主题感，又不会暗到看不清歌词
+                val primaryColor = albumPalette?.primary ?: Color(0xFF4A4A4A)
+
+                androidx.compose.ui.graphics.lerp(
+                    primaryColor,
+                    Color.White,
+                    0.25f
+                )
             } else {
-                // ✨【深色奢华背景】
-                // 完美修复：直接调用你在 PlayerStateHolder 里就已经帮我提取并用 HSV 约束优化好的「accent」字段！
-                // 它本身就是纯正的 LightMuted 绸质香槟白，在暗夜中呈现丝绸般的微光，若为 null 则优雅降级为暖羊绒白
-                albumPalette?.accent ?: Color(0xFFF2E6CE)
+                // ✨【深色背景】
+                // 使用优化后的 accent 高亮色
+                // 同时稍微提高透明度，让歌词更亮、更清晰
+                (albumPalette?.accent ?: Color(0xFFF2E6CE))
+                    .copy(alpha = 0.95f)
             }
         }
 
