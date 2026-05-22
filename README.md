@@ -49,6 +49,16 @@
 * **📊 极客级详细信息面板 (Geek-Level Info)**
   一键查看硬核音频档案：编码格式、动态回放增益 (ReplayGain)、空间音频声道检测 (Spatial Audio/AV3A 12声道)、文件修改时间以及精准的听歌足迹记录。
 
+### 📊 极客硬核声学分析与真假无损鉴定 (Acoustic Spectrogram & Anti-Fraud Engine)
+* **🧪 原生底层硬件解码硬核探针 (Low-Level MediaCodec Extraction)**
+  绕过所有高层 API，直接调用底层的 `MediaExtractor` 与 `MediaCodec` 原生音频硬解码器。在歌曲 1/3 的黄金时间点抽取 20 秒完整 PCM 数据流，混合双声道信号并进行物理级浮点归一化。
+* **📐 基-2 快速傅里叶变换与汉宁窗去噪 (2048-Point FFT & Hann Windowing)**
+  内置数字信号处理（DSP）算法栈。在分帧阶段强制施加汉宁窗函数，完美消除信号截断带来的频谱泄露与高频伪影；通过 2048 点高级 FFT 算法，将时域信号精准离散映射到 1024 个频段能量桶中。
+* **🛡️ 动态能量阈值反推与假无损欺诈检测 (Programmatic Anti-Fake-FLAC Audit)**
+  设定严苛的 `-65.0 dB` 活跃声学能量阈值线。利用奈奎斯特频率物理公式推导最真实的物理高频截止频率（Cutoff）。设立音质欺诈漏斗判定：全自动曝光低码率 MP3 强行扩容转 FLAC 的“假无损”行为，点亮“真无损/音质欺诈”真值标签。
+* **🎨 专业级 Spek 视觉色阶全频谱图渲染 (Spek-Style Energy Heatmap)**
+  自研热力分贝能量映射算法。将所有帧的频域能量转化映射为高对比度的发烧友专业色域（深蓝 $\rightarrow$ 紫 $\rightarrow$ 翠绿 $\rightarrow$ 闪黄 $\rightarrow$ 艳红）。渲染出像素级高保真全声谱热力图 Bitmap，让母带能量肉眼可见。
+
 ---
 
 ## 🛠️ 技术栈 (Tech Stack)
@@ -63,12 +73,15 @@ graph TD
 
 ```
 
-* **UI 框架**: Jetpack Compose 100% 纯声明式构建 (Material Design 3)
+* **UI 框架**: Jetpack Compose 100% 纯声明式构建 (Material Design 3 + Nonce 状态重绘联动)
 * **内核驱动**: AndroidX Media3 (ExoPlayer 内核)
 * **音频解析**: `MediaExtractor`, `MediaMetadataRetriever`, `jaudiotagger`
 * **异步并发**: Kotlin Coroutines & Flow (自适应切换 `Dispatchers.IO` / `Main`)
 * **本地存储**: Room Database (基于破坏性迁移策略升级多张关联表)
 * **网络请求**: OkHttp3 (15s 超时拉长防断链路) & Gson
+* **核心组件**: `SpectrogramGenerator` (硬解码傅里叶变声谱发生器)、`AutoCoverFetcher` (信号量限流封面泵)、`OnlineLyricsRepository` (指纹黑名单歌词流)
+* **信号处理 (DSP)**: 2048点快速傅里叶变换、汉宁窗时域加权、`-65dB` 声学截止频率推导算法
+* **网络请求**: OkHttp3 (Cookie 风控伪装注入、JSONP 剥离重构器)
 
 ---
 
