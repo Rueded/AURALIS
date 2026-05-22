@@ -274,7 +274,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             else {
                 mediaController?.let { controller ->
                     val mediaItems = currentList.map { s ->
-                        val metadata = androidx.media3.common.MediaMetadata.Builder().setTitle(s.title).setArtist(s.artist).build()
+                        val artworkUri = android.net.Uri.parse("auralis://cover?path=" + java.net.URLEncoder.encode(s.data, "UTF-8"))
+                        val metadata = androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(s.title)
+                            .setArtist(s.artist)
+                            .setArtworkUri(artworkUri)
+                            .build()
                         androidx.media3.common.MediaItem.Builder().setMediaId(s.data).setUri(s.data).setMediaMetadata(metadata).build()
                     }
                     controller.setMediaItems(mediaItems, index, 0L); controller.prepare(); controller.play()
@@ -311,14 +316,24 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     Toast.makeText(context, "已移至下一首播放", Toast.LENGTH_SHORT).show()
                 } else {
                     // 场景 B：完全是一首新歌，正常插入
-                    val metadata = MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).build()
+                    val artworkUri = android.net.Uri.parse("auralis://cover?path=" + java.net.URLEncoder.encode(song.data, "UTF-8"))
+                    val metadata = MediaMetadata.Builder()
+                        .setTitle(song.title)
+                        .setArtist(song.artist)
+                        .setArtworkUri(artworkUri)
+                        .build()
                     val mediaItem = MediaItem.Builder().setMediaId(song.data).setUri(song.data).setMediaMetadata(metadata).build()
                     controller.addMediaItem(nextIdx, mediaItem)
                     Toast.makeText(context, "已添加到下一首", Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // 如果当前什么都没在播放，就直接播放这首歌
-                val metadata = MediaMetadata.Builder().setTitle(song.title).setArtist(song.artist).build()
+                val artworkUri = android.net.Uri.parse("auralis://cover?path=" + java.net.URLEncoder.encode(song.data, "UTF-8"))
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artist)
+                    .setArtworkUri(artworkUri)
+                    .build()
                 val mediaItem = MediaItem.Builder().setMediaId(song.data).setUri(song.data).setMediaMetadata(metadata).build()
                 controller.setMediaItem(mediaItem)
                 controller.prepare()

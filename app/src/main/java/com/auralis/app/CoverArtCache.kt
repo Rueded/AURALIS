@@ -110,7 +110,7 @@ object CoverArtCache {
         if (bitmap == null || forceNetwork) {
             bitmap = CoverFetcher.fetchHighResCover(title, artist)
             if (bitmap == null && !forceNetwork) {
-                bitmap = loadAlbumArtFromMediaStore(context, path, title, artist)
+                bitmap = loadAlbumArtFromMediaStore(context, path)
             }
         }
 
@@ -168,7 +168,7 @@ object CoverArtCache {
         refreshed
     }
 
-    private suspend fun loadAlbumArtFromMediaStore(context: Context, path: String, title: String, artist: String): Bitmap? {
+    suspend fun loadAlbumArtFromMediaStore(context: Context, path: String): Bitmap? {
         return try {
             val song = AppDatabase.getDatabase(context).songDao().getSongByPath(path) ?: return null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

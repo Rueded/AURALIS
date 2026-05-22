@@ -137,24 +137,25 @@ fun LyricLineItem(
     isCurrent: Boolean,
     isPausedForInteraction: Boolean,
     fontSizeSp: Float,
+    activeColor: Color = Color(0xFFFFD700), // ✨ 新增参数：接收根据背景色实时算出的最适配高亮色
     onSeek: () -> Unit
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val scale by animateFloatAsState(
-        if (isCurrent) 1.04f else 1f,
-        spring(dampingRatio = 0.7f, stiffness = 400f),
+        if (isCurrent) 1.05f else 1f,
+        spring(dampingRatio = 0.65f, stiffness = 350f),
         label = "lyricScale"
     )
     val alpha by animateFloatAsState(
-        if (isCurrent) 1f else 0.45f,
-        tween(250),
+        if (isCurrent) 1f else 0.5f,
+        tween(200),
         label = "lyricAlpha"
     )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
+            .padding(vertical = 4.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -162,27 +163,45 @@ fun LyricLineItem(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 左侧时间轴提示数字
         Text(
-            formatTime(timeMs),
-            fontSize = 10.sp,
-            color = if (isPausedForInteraction) primary.copy(0.7f) else primary.copy(0.25f),
+            text = formatTime(timeMs),
+            fontSize = 11.sp,
+            style = androidx.compose.ui.text.TextStyle(
+                color = if (isPausedForInteraction) Color.White else Color.White.copy(alpha = 0.35f),
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = Color.Black.copy(alpha = 0.8f),
+                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                    blurRadius = 3f
+                )
+            ),
             modifier = Modifier.width(44.dp),
             textAlign = TextAlign.End
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(8.dp))
+
+        // 歌词载体卡片
         Surface(
             onClick = onSeek,
-            shape = RoundedCornerShape(16.dp),
-            color = if (isCurrent) primary.copy(alpha = 0.12f) else Color.Transparent
+            shape = RoundedCornerShape(14.dp),
+            color = if (isCurrent) Color.Black.copy(alpha = 0.28f) else Color.Transparent
         ) {
             Text(
-                text,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                fontSize = if (isCurrent) (fontSizeSp + 4).sp else fontSizeSp.sp,
+                text = text,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                fontSize = if (isCurrent) (fontSizeSp + 3).sp else fontSizeSp.sp,
                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                color = primary.copy(alpha = alpha),
                 textAlign = TextAlign.Center,
-                lineHeight = (fontSizeSp + 8).sp
+                lineHeight = (fontSizeSp + 8).sp,
+                // ✨ 修复：动态采用自适应 activeColor 色彩方案，搭配抗眩光边缘全景阴影
+                style = androidx.compose.ui.text.TextStyle(
+                    color = if (isCurrent) activeColor else Color.White.copy(alpha = alpha),
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black.copy(alpha = 0.95f),
+                        offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                        blurRadius = 5f
+                    )
+                )
             )
         }
         Spacer(Modifier.width(50.dp))

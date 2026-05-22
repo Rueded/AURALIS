@@ -15,8 +15,9 @@ import java.util.concurrent.TimeUnit
 enum class LyricsSource(val label: String) {
     LOCAL("本地"),
     NETEASE("网易云"),
+    QQ("QQ音乐"),
     KUGOU("酷狗"),
-    KUWOU("酷我"),
+    LRCLIB("LrcLib"),
     NONE("无歌词")
 }
 
@@ -24,6 +25,17 @@ data class LyricsResult(
     val lines: List<LrcLine>,
     val source: LyricsSource,
     val rawLrc: String = ""
+)
+
+data class LyricCandidate(
+    val platform: String,
+    val id: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationSec: Int,
+    val score: Double = 0.0,
+    val previewLrc: String = ""
 )
 
 object OnlineLyricsRepository {
@@ -46,7 +58,6 @@ object OnlineLyricsRepository {
     // 💡 修复2：用 context.cacheDir（internal），卸载 app 时自动清除
     private fun diskCacheFile(audioPath: String, context: Context): File {
         val dir = File(context.cacheDir, "lyrics_cache").also { it.mkdirs() }
-        // key = audioPath 的 hash，避免文件名包含非法字符
         return File(dir, "${audioPath.hashCode()}.lrc")
     }
 
@@ -56,7 +67,6 @@ object OnlineLyricsRepository {
             if (!file.exists()) return null
             val raw = file.readText()
             if (raw.isBlank()) return null
-            // 第一行存 source 枚举名，其余是原始 LRC
             val lines = raw.lines()
             val source = LyricsSource.entries.firstOrNull { it.name == lines[0] }
                 ?: LyricsSource.NETEASE
@@ -70,20 +80,18 @@ object OnlineLyricsRepository {
         }
     }
 
-    private fun writeDiskCache(audioPath: String, result: LyricsResult, context: Context) {
+    fun writeDiskCache(audioPath: String, result: LyricsResult, context: Context) {
         try {
             if (result.source == LyricsSource.NONE || result.rawLrc.isBlank()) return
             val file = diskCacheFile(audioPath, context)
-            // 第一行写 source 枚举名，方便反序列化
             file.writeText("${result.source.name}\n${result.rawLrc}")
         } catch (e: Exception) {
             Log.w(TAG, "写磁盘歌词缓存失败：${e.message}")
         }
     }
 
-    // ── 歌词黑名单（用户主动删除的歌词，刷新时不再加载）────────────────────────────
+    // ── 歌词黑名单 ────────────────────────────────────────────────────────────
 
-    /** 生成一条歌词记录的唯一指纹（source + rawLrc 前200字符 hash）*/
     private fun lyricsFingerprint(source: LyricsSource, rawLrc: String): String =
         "${source.name}_${rawLrc.take(200).hashCode()}"
 
@@ -92,13 +100,8 @@ object OnlineLyricsRepository {
         return prefs.getStringSet("banned", mutableSetOf())!!.toMutableSet()
     }
 
-    /**
-     * 把当前缓存的歌词加入黑名单，刷新时跳过。
-     * 在用户点「垃圾桶」时调用（先于 clearCache）。
-     */
     fun banCurrentLyrics(audioPath: String, context: Context) {
         val cached = memoryCache[audioPath] ?: run {
-            // 尝试读磁盘缓存
             readDiskCache(audioPath, context)
         } ?: return
         if (cached.source == LyricsSource.NONE || cached.rawLrc.isBlank()) return
@@ -110,17 +113,11 @@ object OnlineLyricsRepository {
         Log.d(TAG, "歌词已加入黑名单：$fp")
     }
 
-    /** 判断某条 rawLrc 是否在黑名单中 */
     private fun isBanned(source: LyricsSource, rawLrc: String, context: Context): Boolean =
         getBannedFingerprints(context).contains(lyricsFingerprint(source, rawLrc))
 
     // ── 公开 API ──────────────────────────────────────────────────────────────
 
-    /**
-     * 获取歌词。优先级：本地 LRC → 磁盘缓存 → 内存缓存 → 网络
-     *
-     * @param forceOnline 强制重新联网拉取（用于"刷新"按钮）
-     */
     suspend fun getLyrics(
         audioPath: String,
         title: String,
@@ -129,7 +126,6 @@ object OnlineLyricsRepository {
         forceOnline: Boolean = false
     ): LyricsResult = withContext(Dispatchers.IO) {
 
-        // 1. 本地 LRC 文件优先（不受 forceOnline 影响，本地永远优先）
         if (!forceOnline) {
             val local = LrcParser.parse(audioPath)
             if (local.isNotEmpty()) {
@@ -138,7 +134,6 @@ object OnlineLyricsRepository {
             }
         }
 
-        // 2. 磁盘缓存（非强制刷新时读取）
         if (!forceOnline) {
             val disk = readDiskCache(audioPath, context)
             if (disk != null) {
@@ -148,32 +143,48 @@ object OnlineLyricsRepository {
             }
         }
 
-        // 3. 内存缓存（非强制刷新时读取）
         if (!forceOnline) {
             memoryCache[audioPath]?.let {
                 if (it.source != LyricsSource.NONE) return@withContext it
             }
         }
 
-        // 4. 联网获取
         val keyword = buildKeyword(title, artist)
         Log.d(TAG, "联网搜索歌词：\"$keyword\"（audioPath=$audioPath）")
 
-        val result = fetchNeteaseLyrics(keyword, context)
-            ?: fetchKugouLyrics(keyword, context)
-            ?: fetchKuwouLyrics(keyword, context)
-            ?: LyricsResult(emptyList(), LyricsSource.NONE)
+        val prefs = context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+        val sourcePref = prefs.getString("online_lyrics_source", "auto") ?: "auto"
 
-        // 写回缓存
-        memoryCache[audioPath] = result
-        writeDiskCache(audioPath, result, context)
+        val searchOrder = when (sourcePref) {
+            "163" -> listOf(LyricsSource.NETEASE, LyricsSource.QQ, LyricsSource.KUGOU, LyricsSource.LRCLIB)
+            "qq" -> listOf(LyricsSource.QQ, LyricsSource.NETEASE, LyricsSource.KUGOU, LyricsSource.LRCLIB)
+            "kugou" -> listOf(LyricsSource.KUGOU, LyricsSource.NETEASE, LyricsSource.QQ, LyricsSource.LRCLIB)
+            "lrclib" -> listOf(LyricsSource.LRCLIB, LyricsSource.NETEASE, LyricsSource.QQ, LyricsSource.KUGOU)
+            else -> listOf(LyricsSource.NETEASE, LyricsSource.QQ, LyricsSource.KUGOU, LyricsSource.LRCLIB)
+        }
 
-        result
+        var result: LyricsResult? = null
+        for (src in searchOrder) {
+            result = when (src) {
+                LyricsSource.NETEASE -> fetchNeteaseLyrics(keyword, context)
+                LyricsSource.QQ -> fetchQQLyrics(keyword, context)
+                LyricsSource.KUGOU -> fetchKugouLyrics(keyword, context)
+                LyricsSource.LRCLIB -> fetchLrcLibLyrics(keyword, context)
+                else -> null
+            }
+            if (result != null && result.lines.isNotEmpty()) {
+                break
+            }
+        }
+
+        val finalResult = result ?: LyricsResult(emptyList(), LyricsSource.NONE)
+
+        memoryCache[audioPath] = finalResult
+        writeDiskCache(audioPath, finalResult, context)
+
+        finalResult
     }
 
-    /**
-     * 删除指定歌曲的所有歌词缓存（用于"删除错误歌词"按钮）。
-     */
     fun clearCache(audioPath: String, context: Context) {
         memoryCache.remove(audioPath)
         try {
@@ -184,10 +195,6 @@ object OnlineLyricsRepository {
         }
     }
 
-    /**
-     * 强制重新联网获取并覆盖缓存。
-     * UI 侧"刷新"按钮直接调用这个即可。
-     */
     suspend fun refreshFromNetwork(
         audioPath: String,
         title: String,
@@ -198,44 +205,45 @@ object OnlineLyricsRepository {
         return getLyrics(audioPath, title, artist, context, forceOnline = true)
     }
 
+    fun updateCacheMemoryAndDisk(audioPath: String, result: LyricsResult, context: Context) {
+        memoryCache[audioPath] = result
+        writeDiskCache(audioPath, result, context)
+    }
+
     // ── 网易云音乐 API ────────────────────────────────────────────────────────
 
     private fun fetchNeteaseLyrics(keyword: String, context: Context): LyricsResult? {
         return try {
-            val searchUrl =
-                "https://music.163.com/api/search/get/web?csrf_token=hlpretag=&hlposttag=&s=" +
-                        "${URLEncoder.encode(keyword, "UTF-8")}&type=1&offset=0&total=true&limit=5"
-            val headers = mapOf(
-                "User-Agent" to PC_UA,
-                "Referer"    to "https://music.163.com/"
-            )
-
-            val searchResp = getJson(searchUrl, headers) ?: return null
-            val songs = searchResp.optJSONObject("result")?.optJSONArray("songs") ?: return null
-            if (songs.length() == 0) return null
-
-            // Try up to 5 candidates, skip blacklisted ones
-            for (i in 0 until songs.length()) {
-                val songId = songs.getJSONObject(i).optLong("id")
-
-                val lrcUrl = "https://music.163.com/api/song/lyric?id=$songId&lv=-1&kv=-1&tv=-1"
-                val lrcResp = getJson(lrcUrl, headers) ?: continue
-
-                val raw = lrcResp.optJSONObject("lrc")?.optString("lyric") ?: continue
-                val lines = LrcParser.parseRaw(raw)
-                if (lines.isEmpty()) continue
-
-                if (isBanned(LyricsSource.NETEASE, raw, context)) {
-                    Log.d(TAG, "网易云：跳过黑名单歌词 (候选 $i)")
-                    continue
-                }
-
-                Log.d(TAG, "网易云歌词获取成功：${lines.size} 行（候选 $i）")
-                return LyricsResult(lines, LyricsSource.NETEASE, raw)
-            }
-            return null
+            val candidates = NeteaseLyricsFetcher.searchCandidates(keyword, 0)
+            if (candidates.isEmpty()) return null
+            val best = candidates.first()
+            val raw = NeteaseLyricsFetcher.fetchLyric(best.id) ?: return null
+            if (isBanned(LyricsSource.NETEASE, raw, context)) return null
+            val lines = LrcParser.parseRaw(raw)
+            if (lines.isEmpty()) return null
+            Log.d(TAG, "网易云歌词获取成功：${lines.size} 行")
+            LyricsResult(lines, LyricsSource.NETEASE, raw)
         } catch (e: Exception) {
             Log.w(TAG, "网易云歌词失败：${e.message}")
+            null
+        }
+    }
+
+    // ── QQ音乐 API ──────────────────────────────────────────────────────────
+
+    private fun fetchQQLyrics(keyword: String, context: Context): LyricsResult? {
+        return try {
+            val candidates = QQMusicLyricsFetcher.searchCandidates(keyword, 0)
+            if (candidates.isEmpty()) return null
+            val best = candidates.first()
+            val raw = QQMusicLyricsFetcher.fetchLyric(best.id) ?: return null
+            if (isBanned(LyricsSource.QQ, raw, context)) return null
+            val lines = LrcParser.parseRaw(raw)
+            if (lines.isEmpty()) return null
+            Log.d(TAG, "QQ音乐歌词获取成功：${lines.size} 行")
+            LyricsResult(lines, LyricsSource.QQ, raw)
+        } catch (e: Exception) {
+            Log.w(TAG, "QQ音乐歌词失败：${e.message}")
             null
         }
     }
@@ -244,46 +252,13 @@ object OnlineLyricsRepository {
 
     private fun fetchKugouLyrics(keyword: String, context: Context): LyricsResult? {
         return try {
-            val searchUrl =
-                "https://msearch.kugou.com/api/v3/search/song?keyword=" +
-                        "${URLEncoder.encode(keyword, "UTF-8")}&page=1&pagesize=5&format=json"
-            val searchResp = getJson(searchUrl) ?: return null
-            val songs =
-                searchResp.optJSONObject("data")?.optJSONArray("info") ?: return null
-            if (songs.length() == 0) return null
-
-            val song     = songs.getJSONObject(0)
-            val hash     = song.optString("hash").takeIf { it.isNotEmpty() } ?: return null
-            val duration = song.optLong("duration") * 1000
-
-            val lrcSearchUrl =
-                "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=" +
-                        "${URLEncoder.encode(keyword, "UTF-8")}&hash=$hash&duration=$duration"
-            val lrcSearchResp = getJson(lrcSearchUrl) ?: return null
-
-            val cand =
-                lrcSearchResp.optJSONArray("candidates")?.optJSONObject(0)
-                    ?: lrcSearchResp.optJSONArray("ugccandidates")?.optJSONObject(0)
-                    ?: return null
-
-            val id        = cand.optString("id")
-            val accesskey = cand.optString("accesskey")
-
-            val dlUrl =
-                "https://lyrics.kugou.com/download?ver=1&client=pc&id=$id&accesskey=$accesskey&fmt=lrc&charset=utf8"
-            val dlResp  = getJson(dlUrl) ?: return null
-            val rawB64  = dlResp.optString("content").takeIf { it.isNotEmpty() } ?: return null
-            val raw     =
-                String(android.util.Base64.decode(rawB64, android.util.Base64.DEFAULT))
-
-            if (isBanned(LyricsSource.KUGOU, raw, context)) {
-                Log.d(TAG, "酷狗：歌词在黑名单，跳过")
-                return null
-            }
-
+            val candidates = KuGouLyricsFetcher.searchCandidates(keyword, 0)
+            if (candidates.isEmpty()) return null
+            val best = candidates.first()
+            val raw = KuGouLyricsFetcher.fetchLyric(best.id) ?: return null
+            if (isBanned(LyricsSource.KUGOU, raw, context)) return null
             val lines = LrcParser.parseRaw(raw)
             if (lines.isEmpty()) return null
-
             Log.d(TAG, "酷狗歌词获取成功：${lines.size} 行")
             LyricsResult(lines, LyricsSource.KUGOU, raw)
         } catch (e: Exception) {
@@ -292,29 +267,21 @@ object OnlineLyricsRepository {
         }
     }
 
-    private fun fetchKuwouLyrics(keyword: String, context: Context): LyricsResult? {
+    // ── LrcLib API ────────────────────────────────────────────────────────────
+
+    private fun fetchLrcLibLyrics(keyword: String, context: Context): LyricsResult? {
         return try {
-            val searchUrl = "https://search.kuwo.cn/r.s?all=${URLEncoder.encode(keyword, "UTF-8")}" +
-                "&ft=music&newsearch=1&itemset=web_2013&client=kt&cluster=0&vermerge=1&mobi=1" +
-                "&issubtitle=1&show_copyright_off=1&pcmp4=1&newver=1&type=convert_url&format=json&count=5"
-            val searchResp = getJson(searchUrl, mapOf("User-Agent" to PC_UA)) ?: return null
-            val musicId = searchResp.optJSONArray("abslist")
-                ?.optJSONObject(0)?.optString("MUSICRID")
-                ?.replace("MUSIC_", "") ?: return null
-
-            val lrcUrl = "https://m.kuwo.cn/newh5app/api/pc/lyric/mutil?musicIds=$musicId&type=lrc"
-            val lrcBody = getJson(lrcUrl) ?: return null
-            val raw = lrcBody.optJSONArray("data")
-                ?.optJSONObject(0)?.optString("lrclist") ?: return null
-
-            if (isBanned(LyricsSource.KUWOU, raw, context)) return null
+            val candidates = LrcLibLyricsFetcher.searchCandidates(keyword, 0)
+            if (candidates.isEmpty()) return null
+            val best = candidates.first()
+            val raw = if (best.previewLrc.isNotEmpty()) best.previewLrc else LrcLibLyricsFetcher.fetchLyric(best.id) ?: return null
+            if (isBanned(LyricsSource.LRCLIB, raw, context)) return null
             val lines = LrcParser.parseRaw(raw)
             if (lines.isEmpty()) return null
-
-            Log.d(TAG, "酷我歌词获取成功：${lines.size} 行")
-            LyricsResult(lines, LyricsSource.KUWOU, raw)
+            Log.d(TAG, "LrcLib歌词获取成功：${lines.size} 行")
+            LyricsResult(lines, LyricsSource.LRCLIB, raw)
         } catch (e: Exception) {
-            Log.w(TAG, "酷我歌词失败：${e.message}")
+            Log.w(TAG, "LrcLib歌词失败：${e.message}")
             null
         }
     }

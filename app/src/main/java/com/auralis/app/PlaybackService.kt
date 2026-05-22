@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioMixerAttributes
@@ -34,6 +35,9 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import java.nio.ByteBuffer
 import kotlin.math.sqrt
 
@@ -43,8 +47,12 @@ class PlaybackService : MediaSessionService() {
     companion object {
         var audioSessionId: Int = 0
         var instance: PlaybackService? = null
+
         private val _bitPerfectState = MutableStateFlow(false)
         val bitPerfectState: StateFlow<Boolean> = _bitPerfectState.asStateFlow()
+
+        private val _audioSessionIdState = MutableStateFlow(0)
+        val audioSessionIdState: StateFlow<Int> = _audioSessionIdState.asStateFlow()
 
         @Volatile
         var isCrossfading = false
@@ -58,6 +66,7 @@ class PlaybackService : MediaSessionService() {
     private var isCurrentlyBitPerfect: Boolean = false
     private var player: ExoPlayer? = null
     private var player2: ExoPlayer? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
     private var isUsingPlayer2 = false
     private var isShadowPreloading = false
     private var preloadedNextIndex = -1
@@ -90,7 +99,6 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink {
                 val originalSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(true)
-                    // ✨ 修复 1：开启系统底层变速代理，全面兼容 32-bit Float 高清输出
                     .setEnableAudioTrackPlaybackParams(true)
                     .build()
                 return VisualizerInterceptingAudioSink(originalSink)
@@ -117,15 +125,18 @@ class PlaybackService : MediaSessionService() {
         builtPlayer.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(sessionId: Int) {
                 audioSessionId = sessionId
+                _audioSessionIdState.value = sessionId
             }
         })
         player2?.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(sessionId: Int) {
                 audioSessionId = sessionId
+                _audioSessionIdState.value = sessionId
             }
         })
 
         audioSessionId = builtPlayer.audioSessionId
+        _audioSessionIdState.value = audioSessionId
 
         val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
         val isBitPerfectEnabled = prefs.getBoolean("enable_bit_perfect", false)
@@ -227,8 +238,6 @@ class PlaybackService : MediaSessionService() {
 
             shadowPlayer.repeatMode = mainPlayer.repeatMode
             shadowPlayer.shuffleModeEnabled = mainPlayer.shuffleModeEnabled
-
-            // ✨ 修复 2：让淡入淡出的影子播放器无缝继承哥哥当前的倍速/音调
             shadowPlayer.playbackParameters = mainPlayer.playbackParameters
 
             shadowPlayer.setMediaItems(items, preloadedNextIndex, 0L)
@@ -246,9 +255,12 @@ class PlaybackService : MediaSessionService() {
 
             val startCrossfadeRunnable = Runnable {
                 Log.i("Auralis-Fade", "🔀 准时启动 ${crossfadeSecs}s 淡入淡出！")
+
+                mainPlayer.setAudioAttributes(mainPlayer.audioAttributes, false)
+                shadowPlayer.setAudioAttributes(shadowPlayer.audioAttributes, true)
+
                 isUsingPlayer2 = !isUsingPlayer2
 
-                // Start shadow player first to avoid isPlaying flicker in UI
                 shadowPlayer.volume = 0f
                 shadowPlayer.play()
 
@@ -260,7 +272,6 @@ class PlaybackService : MediaSessionService() {
                         mainPlayer.removeMediaItems(currentIndex + 1, mainPlayer.mediaItemCount)
                     }
                     mainPlayer.repeatMode = Player.REPEAT_MODE_OFF
-                    mainPlayer.setAudioAttributes(mainPlayer.audioAttributes, false)
 
                     startCrossfade(mainPlayer, shadowPlayer, crossfadeMs, startVolume)
                 }, 50)
@@ -342,15 +353,12 @@ class PlaybackService : MediaSessionService() {
             .buildUpon()
             .setAudioOffloadPreferences(offloadPreferences)
             .build()
-
-        Log.d("Auralis", "Offload 模式: ${if (enableOffload) "已启用" else "已禁用（Bit-perfect 路径）"}")
     }
 
     fun applyUsbBitPerfectSetting(enable: Boolean, sampleRate: Int = 0, bitDepth: Int = 0) {
         if (Build.VERSION.SDK_INT < 34) return
         if (enable) {
             tryEnableUsbBitPerfect(sampleRate, bitDepth)
-            // ✨ 强刷防护：一旦独占开启，强制将主副播放器的速率拉回原生 1.0x，杜绝硬件直通下的音频冲突
             player?.playbackParameters = PlaybackParameters.DEFAULT
             player2?.playbackParameters = PlaybackParameters.DEFAULT
         } else {
@@ -358,6 +366,7 @@ class PlaybackService : MediaSessionService() {
         }
         player?.let { applyOffloadPreference(it, enableOffload = false) }
     }
+
 
     private fun tryEnableUsbBitPerfect(requestedSampleRate: Int, requestedBitDepth: Int) {
         if (isCurrentlyBitPerfect || Build.VERSION.SDK_INT < 34) return
@@ -391,19 +400,11 @@ class PlaybackService : MediaSessionService() {
                 isCurrentlyBitPerfect = true
                 _bitPerfectState.value = true
                 mainHandler.post {
-                    android.widget.Toast.makeText(
-                        this,
-                        "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
+                    android.widget.Toast.makeText(this, "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz", android.widget.Toast.LENGTH_SHORT).show()
                 }
             } else {
                 mainHandler.post {
-                    android.widget.Toast.makeText(
-                        this,
-                        "DAC 独占失败: 设备不支持该规格",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
+                    android.widget.Toast.makeText(this, "DAC 独占失败: 设备不支持该规格", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
@@ -467,12 +468,10 @@ class PlaybackService : MediaSessionService() {
             ?: android.media.AudioFormat.ENCODING_PCM_16BIT
     }
 
-    /**
-     * BitmapLoader that only loads embedded artwork bytes.
-     * Blocks all URI/network requests so the notification never fires a network call.
-     */
     @UnstableApi
     private inner class LocalOnlyBitmapLoader : BitmapLoader {
+        private val defaultLoader = androidx.media3.session.SimpleBitmapLoader()
+
         override fun supportsMimeType(mimeType: String) = true
 
         override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> =
@@ -480,10 +479,94 @@ class PlaybackService : MediaSessionService() {
                 android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
             )
 
-        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> =
-            Futures.immediateFailedFuture(
-                UnsupportedOperationException("Auralis: network artwork blocked in notification")
-            )
+        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
+            val uriStr = uri.toString()
+            val future = com.google.common.util.concurrent.SettableFuture.create<Bitmap>()
+
+            serviceScope.launch {
+                var finalBitmap: Bitmap? = null
+                try {
+                    // 1. 原生系统本地媒体库封面文件流
+                    if (uriStr.startsWith("content://")) {
+                        try {
+                            this@PlaybackService.contentResolver.openInputStream(uri).use { stream ->
+                                if (stream != null) {
+                                    finalBitmap = android.graphics.BitmapFactory.decodeStream(stream)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("PlaybackService", "本地 Content 协议封面流读取失败: ${e.message}")
+                        }
+                    }
+                    // 2. 拦截私有高精度标志
+                    else if (uriStr.startsWith("auralis://cover")) {
+                        val path = uri.getQueryParameter("path") ?: ""
+                        if (path.isNotEmpty()) {
+                            // 2a. 提取内嵌音频元数据封面
+                            try {
+                                val retriever = android.media.MediaMetadataRetriever()
+                                retriever.setDataSource(path)
+                                val pic = retriever.embeddedPicture
+                                retriever.release()
+                                if (pic != null) {
+                                    finalBitmap = android.graphics.BitmapFactory.decodeByteArray(pic, 0, pic.size)
+                                }
+                            } catch (e: Exception) {
+                                Log.w("PlaybackService", "内嵌封面解析落空: ${e.message}")
+                            }
+
+                            // 2b. 读取磁盘 WebP 缓存
+                            if (finalBitmap == null) {
+                                finalBitmap = CoverArtCache.loadBitmapFromDisk(this@PlaybackService, path)
+                            }
+
+                            // 2c. 系统 MediaStore 异步匹配
+                            if (finalBitmap == null) {
+                                finalBitmap = CoverArtCache.loadAlbumArtFromMediaStore(this@PlaybackService, path)
+                            }
+
+                            // 2d. 调用网易云网络引擎补全
+                            if (finalBitmap == null) {
+                                val song = AppDatabase.getDatabase(this@PlaybackService).songDao().getSongByPath(path)
+                                if (song != null) {
+                                    val fetched = CoverFetcher.fetchHighResCover(song.title, song.artist)
+                                    if (fetched != null) {
+                                        finalBitmap = fetched
+                                        CoverArtCache.saveBitmap(this@PlaybackService, path, fetched)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 3. 常规直链回滚至默认加载器
+                    else {
+                        val defaultFuture = defaultLoader.loadBitmap(uri)
+                        try {
+                            finalBitmap = defaultFuture.get()
+                        } catch (e: Exception) {
+                            Log.w("PlaybackService", "默认加载器直链拉取落空: ${e.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("PlaybackService", "异步封面拦截链路核心层异常: ${e.message}")
+                } finally {
+                    // ✨【核心解错：绝对防御】若所有链路彻底解析不到图片，解码内置默认图标返回，绝不给通知栏交付 Exception
+                    if (finalBitmap == null) {
+                        try {
+                            finalBitmap = android.graphics.BitmapFactory.decodeResource(
+                                this@PlaybackService.resources,
+                                R.drawable.ic_notification_logo
+                            )
+                        } catch (e: Exception) {
+                            // 极极端兜底：构建 1x1 像素透明图，确保通知引擎常青
+                            finalBitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                        }
+                    }
+                    future.set(finalBitmap)
+                }
+            }
+            return future
+        }
 
         override fun loadBitmapFromMetadata(metadata: MediaMetadata): ListenableFuture<Bitmap>? {
             val data = metadata.artworkData ?: return null
@@ -517,11 +600,7 @@ data class AudioQualityAnalysis(
 
 object VisualizerData {
     @Volatile var amplitude: Float = 0f
-
-    /** 128-band FFT magnitude spectrum, updated ~every 100ms */
     val fftBands = FloatArray(128)
-
-    /** Null until first analysis completes */
     @Volatile var qualityAnalysis: AudioQualityAnalysis? = null
 }
 
@@ -534,17 +613,14 @@ class VisualizerInterceptingAudioSink(
     private var currentChannels = 2
     private var currentSampleRate = 44100
 
-    // Low-pass filter state (for RMS amplitude)
     private var filterStateL = 0.0f
     private var filterStateR = 0.0f
     private val alphaLpf = 0.15f
 
-    // FFT accumulation buffer (4096 samples, power of 2)
     private val FFT_SIZE = 4096
     private val fftAccum = FloatArray(FFT_SIZE)
     private var fftAccumPos = 0
 
-    // Background executor for FFT (single thread, non-blocking)
     private val fftExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "Auralis-FFT").also { it.isDaemon = true }
     }
@@ -653,7 +729,6 @@ class VisualizerInterceptingAudioSink(
         return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 
-    /** Accumulate mono samples; trigger async FFT when buffer is full */
     private fun accumulateMono(sample: Float) {
         fftAccum[fftAccumPos++] = sample
         if (fftAccumPos >= FFT_SIZE) {
@@ -664,7 +739,6 @@ class VisualizerInterceptingAudioSink(
                 try {
                     val spectrum = computeFFT(snapshot)
                     updateFftBands(spectrum, sr)
-                    // Run quality analysis only occasionally (not every buffer)
                     if (shouldRunQualityAnalysis()) {
                         VisualizerData.qualityAnalysis = analyzeQuality(spectrum, sr)
                     }
@@ -676,23 +750,16 @@ class VisualizerInterceptingAudioSink(
     private var qualityAnalysisCounter = 0
     private fun shouldRunQualityAnalysis(): Boolean {
         qualityAnalysisCounter++
-        // Run every 20th FFT (~every 2 seconds at 44.1kHz)
         return qualityAnalysisCounter % 20 == 0
     }
 
-    /**
-     * Cooley-Tukey radix-2 in-place FFT.
-     * Returns magnitude spectrum of length n/2.
-     */
     private fun computeFFT(pcm: FloatArray): FloatArray {
-        val n = pcm.size  // must be power of 2
-        // Apply Hann window
+        val n = pcm.size
         val re = FloatArray(n) { i ->
             pcm[i] * (0.5f - 0.5f * kotlin.math.cos(2.0 * Math.PI * i / (n - 1)).toFloat())
         }
         val im = FloatArray(n)
 
-        // Bit-reversal permutation
         var j = 0
         for (i in 1 until n) {
             var bit = n shr 1
@@ -701,7 +768,6 @@ class VisualizerInterceptingAudioSink(
             if (i < j) { val t = re[i]; re[i] = re[j]; re[j] = t }
         }
 
-        // FFT butterfly
         var len = 2
         while (len <= n) {
             val halfLen = len / 2
@@ -725,16 +791,11 @@ class VisualizerInterceptingAudioSink(
             len *= 2
         }
 
-        // Magnitude
         return FloatArray(n / 2) { i ->
             kotlin.math.sqrt((re[i] * re[i] + im[i] * im[i]).toDouble()).toFloat() / (n / 2)
         }
     }
 
-    /**
-     * Compress the full spectrum into 128 logarithmically-spaced bands
-     * and write into VisualizerData.fftBands[].
-     */
     private fun updateFftBands(spectrum: FloatArray, sampleRate: Int) {
         val numBands = 128
         val maxBin = spectrum.size
@@ -748,9 +809,7 @@ class VisualizerInterceptingAudioSink(
             val binLow  = ((freqLow  / nyquist) * maxBin).toInt().coerceIn(0, maxBin - 1)
             val binHigh = ((freqHigh / nyquist) * maxBin).toInt().coerceIn(binLow + 1, maxBin)
             val avg = spectrum.slice(binLow until binHigh).average().toFloat()
-            // Smooth with previous value
-            VisualizerData.fftBands[band] =
-                VisualizerData.fftBands[band] * 0.6f + avg * 0.4f
+            VisualizerData.fftBands[band] = VisualizerData.fftBands[band] * 0.6f + avg * 0.4f
         }
     }
 
@@ -759,15 +818,12 @@ class VisualizerInterceptingAudioSink(
     private fun analyzeQuality(spectrum: FloatArray, sampleRate: Int): AudioQualityAnalysis {
         val nyquist = sampleRate / 2
         val binHz = nyquist.toFloat() / spectrum.size
-
         val totalEnergy = spectrum.sumOf { (it * it).toDouble() }.toFloat().coerceAtLeast(1e-10f)
-
         val bin16k = (16000 / binHz).toInt().coerceIn(0, spectrum.size - 1)
         val bin20k = (20000 / binHz).toInt().coerceIn(0, spectrum.size - 1)
         val highFreqEnergy = spectrum.slice(bin16k..bin20k).sumOf { (it * it).toDouble() }.toFloat()
         val ratio = highFreqEnergy / totalEnergy
 
-        // Find cutoff: scan from high freq down to first bin with significant energy
         var cutoffHz = nyquist
         val noiseFloor = totalEnergy * 0.00001f
         for (i in bin20k downTo 0) {

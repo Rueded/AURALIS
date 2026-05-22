@@ -100,6 +100,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import kotlinx.coroutines.isActive // 确保引入了 isActive
+import androidx.compose.ui.graphics.luminance
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlin.math.pow
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -182,14 +185,27 @@ fun FullScreenPlayer(
         var isFullscreenLyrics by remember { mutableStateOf(false) }
         var lyricsSource by remember { mutableStateOf(LyricsSource.LOCAL) }
         var showDeleteLyricsConfirm by remember { mutableStateOf(false) }
-        var showRefreshLyricsConfirm by remember { mutableStateOf(false) }
+        var showLyricsSelectorDialog by remember { mutableStateOf(false) }
+        var showCoverSelectorDialog by remember { mutableStateOf(false) }
+        var isSearchingCovers by remember { mutableStateOf(false) }
+        var coverSearchKeyword by remember { mutableStateOf("") }
+        var coverCandidates by remember { mutableStateOf<List<CoverCandidate>>(emptyList()) }
+        var lyricsSearchKeyword by remember { mutableStateOf("") }
+        var isSearchingLyrics by remember { mutableStateOf(false) }
+        var lyricsCandidatesGrouped by remember { mutableStateOf<Map<String, List<LyricCandidate>>>(emptyMap()) }
+
+        var isDetectingSpectrogram by remember { mutableStateOf(false) }
+        var spectrogramResult by remember { mutableStateOf<SpectrogramGenerator.Result?>(null) }
+
         val prefKeySkipDelete  = "skip_delete_lyrics_confirm"
-        val prefKeySkipRefresh = "skip_refresh_lyrics_confirm"
         var skipDeleteConfirm  by remember { mutableStateOf(prefs.getBoolean(prefKeySkipDelete,  false)) }
-        var skipRefreshConfirm by remember { mutableStateOf(prefs.getBoolean(prefKeySkipRefresh, false)) }
 
         var coverRefreshNonce by remember { mutableIntStateOf(0) }
         var coverForceNetwork by remember { mutableStateOf(false) }
+
+        LaunchedEffect(audioPath) {
+            spectrogramResult = null
+        }
 
         val doDeleteLyrics: () -> Unit = {
             scope.launch(Dispatchers.IO) {
@@ -202,25 +218,6 @@ fun FullScreenPlayer(
                     coverForceNetwork = true
                     coverRefreshNonce++
                     android.widget.Toast.makeText(context, "歌词与封面缓存已清除，下次刷新将跳过此结果", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-
-        val doRefreshLyrics: () -> Unit = {
-            scope.launch(Dispatchers.IO) {
-                val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
-                val safeTitle  = dbSong?.title  ?: title
-                val safeArtist = dbSong?.artist ?: artist
-                val result = OnlineLyricsRepository.refreshFromNetwork(
-                    audioPath = audioPath,
-                    title = safeTitle,
-                    artist = safeArtist,
-                    context = context
-                )
-                withContext(Dispatchers.Main) {
-                    lrcLines = result.lines
-                    lyricsSource = result.source
-                    android.widget.Toast.makeText(context, "歌词刷新好啦~", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -246,18 +243,7 @@ fun FullScreenPlayer(
         var abLoopStart by remember { mutableLongStateOf(-1L) }
         var abLoopEnd by remember { mutableLongStateOf(-1L) }
 
-        // ── Audio quality badge state ──
-        val qualityAnalysis = remember { mutableStateOf<AudioQualityAnalysis?>(null) }
-        LaunchedEffect(audioPath) {
-            // Poll for quality analysis result (becomes available a few seconds into playback)
-            while (true) {
-                delay(2000)
-                val qa = VisualizerData.qualityAnalysis
-                if (qa != null) {
-                    qualityAnalysis.value = qa
-                }
-            }
-        }
+        // ── Removed Audio quality badge state ──
 
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).toFloat()
         var currentVolume by remember {
@@ -285,6 +271,22 @@ fun FullScreenPlayer(
             animationSpec = tween(1500, easing = LinearEasing),
             label = "dominantColor"
         )
+
+        val dynamicLyricActiveColor = remember(animatedDominantColor, albumPalette) {
+            val luminance = animatedDominantColor.luminance()
+            if (luminance > 0.5f) {
+                // ✨【浅色高雅背景】
+                // 核心高奢算法：利用 Compose 原生 lerp 函数，将专辑主色（primary）向暗曜岩黑（0xFF1A1D1A）深层晕染 85%
+                // 这样能诞生出带有当前专辑独特基因的「高定深邃墨色」，具备完美的对比度与纸张印刷般的内敛质感
+                val primaryColor = albumPalette?.primary ?: Color(0xFF2C302E)
+                androidx.compose.ui.graphics.lerp(primaryColor, Color(0xFF1A1D1A), 0.85f)
+            } else {
+                // ✨【深色奢华背景】
+                // 完美修复：直接调用你在 PlayerStateHolder 里就已经帮我提取并用 HSV 约束优化好的「accent」字段！
+                // 它本身就是纯正的 LightMuted 绸质香槟白，在暗夜中呈现丝绸般的微光，若为 null 则优雅降级为暖羊绒白
+                albumPalette?.accent ?: Color(0xFFF2E6CE)
+            }
+        }
 
 
         val currentLyricIndex = remember(
@@ -934,10 +936,9 @@ fun FullScreenPlayer(
                                 lyricsFontSize = (lyricsFontSize + 2f).coerceAtMost(36f)
                             }) { Text("A+", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                             IconButton(onClick = {
-                                if (skipRefreshConfirm) doRefreshLyrics()
-                                else showRefreshLyricsConfirm = true
+                                showLyricsSelectorDialog = true
                             }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Refresh, contentDescription = "选择歌词", tint = MaterialTheme.colorScheme.primary)
                             }
 
                             IconButton(onClick = {
@@ -972,15 +973,8 @@ fun FullScreenPlayer(
                                 }
                             }
 
-                            IconButton(onClick = {
-                                scope.launch {
-                                    CoverArtCache.invalidate(context, audioPath)
-                                    coverForceNetwork = true
-                                    coverRefreshNonce++
-                                    android.widget.Toast.makeText(context, "正在重新获取封面…", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
-                                Icon(Icons.Filled.Image, "刷新封面", tint = MaterialTheme.colorScheme.primary)
+                            IconButton(onClick = { showCoverSelectorDialog = true }) {
+                                Icon(Icons.Filled.Image, "选择封面", tint = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
@@ -1024,6 +1018,7 @@ fun FullScreenPlayer(
                                         isCurrent = index == currentLyricIndex,
                                         isPausedForInteraction = isLyricsPausedForInteraction,
                                         fontSizeSp = lyricsFontSize,
+                                        activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                         onSeek = {
                                             mediaController?.seekTo(line.timeMs)
                                             currentPosition = line.timeMs
@@ -1049,43 +1044,7 @@ fun FullScreenPlayer(
                                     modifier = Modifier.fillMaxWidth()
                                 )
 
-                                // ── Audio quality badge (Landscape) ──
-                                qualityAnalysis.value?.let { qa ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .padding(horizontal = 24.dp, vertical = 4.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(
-                                                if (qa.isSuspect)
-                                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-                                                else
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                            )
-                                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (qa.isSuspect) Icons.Default.Warning else Icons.Default.CheckCircle,
-                                            contentDescription = null,
-                                            tint = if (qa.isSuspect) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = qa.estimatedSource,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (qa.isSuspect) MaterialTheme.colorScheme.onErrorContainer
-                                            else MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            text = "≤ ${qa.detectedCutoffHz / 1000}kHz",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-
+                                // ── Audio quality badge removed ──
                                 spec?.let {
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1117,27 +1076,35 @@ fun FullScreenPlayer(
 
                                 // 👇 高清渐进式加载 (无损画质 + 0延迟占位 + 双击红心 + 左右滑切歌)
                                 AnimatedContent(
-                                    targetState = audioPath,
+                                    // 💡 修复：将 targetState 升级为携带 nonce 的复合 Key
+                                    targetState = "$audioPath?nonce=$coverRefreshNonce",
                                     transitionSpec = {
-                                        (fadeIn(tween(500)) + scaleIn(
-                                            initialScale = 0.85f,
-                                            animationSpec = tween(500)
-                                        ))
-                                            .togetherWith(
-                                                fadeOut(tween(500)) + scaleOut(
-                                                    targetScale = 1.15f,
-                                                    animationSpec = tween(500)
-                                                )
-                                            )
+                                        (fadeIn(tween(500)) + scaleIn(initialScale = 0.85f, animationSpec = tween(500)))
+                                            .togetherWith(fadeOut(tween(500)) + scaleOut(targetScale = 1.15f, animationSpec = tween(500)))
                                     },
-                                    label = "coverTransitionLandscape"
-                                ) { path ->
-                                    val lowResPlaceholder =
-                                        remember(path) { AudioCache.getFromMemory(path)?.bitmap }
-                                    var highResBitmap by remember(path) {
-                                        mutableStateOf<ImageBitmap?>(
-                                            null
-                                        )
+                                    label = "coverTransitionLandscape" // 横屏对应改成 "coverTransitionLandscape"
+                                ) { targetKey ->
+                                    // 拆解出真实的音频路径
+                                    val path = targetKey.substringBefore("?nonce=")
+                                    val lowResPlaceholder = remember(path) { AudioCache.getFromMemory(path)?.bitmap }
+
+                                    // 💡 修复：直接挂载复合 targetKey，一旦点击刷新，高清图槽位立即清空重载
+                                    var highResBitmap by remember(targetKey) { mutableStateOf<ImageBitmap?>(null) }
+
+                                    LaunchedEffect(targetKey) {
+                                        val forceNet = coverForceNetwork
+                                        coverForceNetwork = false
+                                        highResBitmap = withContext(Dispatchers.IO) {
+                                            val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(path)
+                                            CoverArtCache.loadCover(
+                                                context = context,
+                                                path = path,
+                                                title = dbSong?.title ?: title,
+                                                artist = dbSong?.artist ?: artist,
+                                                forceNetwork = forceNet,
+                                                updateGlobalTheme = path == PlayerStateHolder.currentPath
+                                            )
+                                        }
                                     }
 
                                     LaunchedEffect(path, coverRefreshNonce) {
@@ -1242,6 +1209,7 @@ fun FullScreenPlayer(
                                                     isCurrent = index == currentLyricIndex,
                                                     isPausedForInteraction = isLyricsPausedForInteraction,
                                                     fontSizeSp = lyricsFontSize,
+                                                    activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                                     onSeek = {
                                                         mediaController?.seekTo(line.timeMs)
                                                         currentPosition = line.timeMs
@@ -1301,10 +1269,9 @@ fun FullScreenPlayer(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }; IconButton(onClick = {
-                                    if (skipRefreshConfirm) doRefreshLyrics()
-                                    else showRefreshLyricsConfirm = true
+                                    showLyricsSelectorDialog = true
                                 }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = "刷新歌词", tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Default.Refresh, contentDescription = "选择歌词", tint = MaterialTheme.colorScheme.primary)
                                 }
 
                                 IconButton(onClick = {
@@ -1316,14 +1283,7 @@ fun FullScreenPlayer(
                                 Spacer(Modifier.width(8.dp))
                             }
 
-                            IconButton(onClick = {
-                                scope.launch {
-                                    CoverArtCache.invalidate(context, audioPath)
-                                    coverForceNetwork = true
-                                    coverRefreshNonce++
-                                    android.widget.Toast.makeText(context, "正在重新获取封面…", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
+                            IconButton(onClick = { showCoverSelectorDialog = true }) {
                                 Icon(Icons.Filled.Image, "刷新封面", tint = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
@@ -1417,6 +1377,7 @@ fun FullScreenPlayer(
                                         isCurrent = index == currentLyricIndex,
                                         isPausedForInteraction = isLyricsPausedForInteraction,
                                         fontSizeSp = lyricsFontSize,
+                                        activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                         onSeek = {
                                             mediaController?.seekTo(line.timeMs)
                                             currentPosition = line.timeMs
@@ -1436,27 +1397,35 @@ fun FullScreenPlayer(
 
                             // 👇 高清渐进式加载 (无损画质 + 0延迟占位 + 双击红心 + 左右滑切歌)
                             AnimatedContent(
-                                targetState = audioPath,
+                                // 💡 修复：将 targetState 升级为携带 nonce 的复合 Key
+                                targetState = "$audioPath?nonce=$coverRefreshNonce",
                                 transitionSpec = {
-                                    (fadeIn(tween(500)) + scaleIn(
-                                        initialScale = 0.85f,
-                                        animationSpec = tween(500)
-                                    ))
-                                        .togetherWith(
-                                            fadeOut(tween(500)) + scaleOut(
-                                                targetScale = 1.15f,
-                                                animationSpec = tween(500)
-                                            )
-                                        )
+                                    (fadeIn(tween(500)) + scaleIn(initialScale = 0.85f, animationSpec = tween(500)))
+                                        .togetherWith(fadeOut(tween(500)) + scaleOut(targetScale = 1.15f, animationSpec = tween(500)))
                                 },
-                                label = "coverTransitionPortrait"
-                            ) { path ->
-                                val lowResPlaceholder =
-                                    remember(path) { AudioCache.getFromMemory(path)?.bitmap }
-                                var highResBitmap by remember(path) {
-                                    mutableStateOf<ImageBitmap?>(
-                                        null
-                                    )
+                                label = "coverTransitionPortrait" // 横屏对应改成 "coverTransitionLandscape"
+                            ) { targetKey ->
+                                // 拆解出真实的音频路径
+                                val path = targetKey.substringBefore("?nonce=")
+                                val lowResPlaceholder = remember(path) { AudioCache.getFromMemory(path)?.bitmap }
+
+                                // 💡 修复：直接挂载复合 targetKey，一旦点击刷新，高清图槽位立即清空重载
+                                var highResBitmap by remember(targetKey) { mutableStateOf<ImageBitmap?>(null) }
+
+                                LaunchedEffect(targetKey) {
+                                    val forceNet = coverForceNetwork
+                                    coverForceNetwork = false
+                                    highResBitmap = withContext(Dispatchers.IO) {
+                                        val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(path)
+                                        CoverArtCache.loadCover(
+                                            context = context,
+                                            path = path,
+                                            title = dbSong?.title ?: title,
+                                            artist = dbSong?.artist ?: artist,
+                                            forceNetwork = forceNet,
+                                            updateGlobalTheme = path == PlayerStateHolder.currentPath
+                                        )
+                                    }
                                 }
 
                                 LaunchedEffect(path, coverRefreshNonce) {
@@ -1548,43 +1517,7 @@ fun FullScreenPlayer(
                                 onArtistClick = onArtistClick
                             )
 
-                            // ── Audio quality badge (Portrait) ──
-                            qualityAnalysis.value?.let { qa ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .padding(horizontal = 24.dp, vertical = 4.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (qa.isSuspect)
-                                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-                                            else
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                        )
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (qa.isSuspect) Icons.Default.Warning else Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (qa.isSuspect) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = qa.estimatedSource,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (qa.isSuspect) MaterialTheme.colorScheme.onErrorContainer
-                                        else MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = "≤ ${qa.detectedCutoffHz / 1000}kHz",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
+                            // ── Audio quality badge removed ──
                             Spacer(Modifier.height(16.dp))
                             ControlsSection(isLandscapeLayout = false)
                             Spacer(Modifier.height(16.dp))
@@ -1605,12 +1538,141 @@ fun FullScreenPlayer(
                 }
             },
             text = {
-                Text(
-                    detailedInfo,
-                    style = MaterialTheme.typography.bodyMedium,
-                    lineHeight = 22.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .fillMaxWidth()
+                ) {
+                    Text(
+                        detailedInfo,
+                        style = MaterialTheme.typography.bodyMedium,
+                        lineHeight = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // --- Spectrogram Section ---
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
+                    Spacer(Modifier.height(16.dp))
+
+                    Text("🔍 声学高频真伪鉴定 (Acoustic Quality Audit)", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+
+                    if (spectrogramResult == null) {
+                        if (isDetectingSpectrogram) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(12.dp))
+                                Text("正在解码PCM并计算FFT频谱图...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    isDetectingSpectrogram = true
+                                    scope.launch {
+                                        val res = SpectrogramGenerator.generate(audioPath)
+                                        spectrogramResult = res
+                                        isDetectingSpectrogram = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Search, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("进行声学真伪鉴定 (Spek)")
+                            }
+                        }
+                    } else {
+                        val res = spectrogramResult!!
+                        Column {
+                            // Verdict Badge
+                            val badgeColor = when {
+                                res.isLossless -> Color(0xFF2E7D32) // Green
+                                res.cutoffHz >= 18000f -> Color(0xFFEF6C00) // Orange
+                                else -> Color(0xFFC62828) // Red
+                            }
+
+                            val badgeBgColor = badgeColor.copy(alpha = 0.15f)
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(badgeBgColor)
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (res.isLossless) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = badgeColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text(res.verdict, fontWeight = FontWeight.Bold, color = badgeColor, style = MaterialTheme.typography.bodyMedium)
+                                    Text(res.verdictDetails, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            // High-res Spek-style color map bitmap visualizer
+                            Text(
+                                text = "频谱频率上限：${String.format("%.1f", res.cutoffHz / 1000.0f)} kHz (Nyquist: ${String.format("%.1f", res.bitmap.height / 1024.0 * 22.05)} kHz)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(8.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF0A0A1E))
+                            ) {
+                                Image(
+                                    bitmap = res.bitmap.asImageBitmap(),
+                                    contentDescription = "Spek Spectrogram",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.FillBounds
+                                )
+
+                                Column(
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("22 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("16 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("8 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("0 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+                            Text("※ 声学特征由 Auralis On-Demand Spectrogram 自动解码分析得出，由于静音片段或经典曲目特征可能有微弱误差，检测结果仅供参考。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                        }
+                    }
+                }
             },
             confirmButton = {
                 FilledTonalButton(onClick = { showInfoDialog = false }) { Text("关闭") }
@@ -1658,42 +1720,413 @@ fun FullScreenPlayer(
             )
         }
 
-        // ── 刷新歌词确认弹窗 ──────────────────────────────────────────────────────
-        if (showRefreshLyricsConfirm) {
-            var dontAskAgain by remember { mutableStateOf(false) }
+        // ── 多源歌词精准选择弹窗 ──────────────────────────────────────────────────────
+        if (showLyricsSelectorDialog) {
+            val expandedPlatforms = remember { mutableStateMapOf<String, Boolean>() }
+            var applyingCandidateId by remember { mutableStateOf<String?>(null) }
+
+            // Initialize search query if empty
+            LaunchedEffect(showLyricsSelectorDialog) {
+                if (showLyricsSelectorDialog) {
+                    val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                    val safeTitle = dbSong?.title ?: title
+                    val safeArtist = dbSong?.artist ?: artist
+                    lyricsSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != "未知歌手") "$safeArtist $safeTitle" else safeTitle
+
+                    isSearchingLyrics = true
+                    scope.launch(Dispatchers.IO) {
+                        val keyword = lyricsSearchKeyword
+                        val jobs = listOf(
+                            async { runCatching { NeteaseLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                            async { runCatching { QQMusicLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                            async { runCatching { KuGouLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                            async { runCatching { LrcLibLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) }
+                        )
+                        val results = jobs.awaitAll()
+                        val grouped = mapOf(
+                            "网易云" to results[0],
+                            "QQ音乐" to results[1],
+                            "酷狗" to results[2],
+                            "LrcLib" to results[3]
+                        )
+                        withContext(Dispatchers.Main) {
+                            lyricsCandidatesGrouped = grouped
+                            isSearchingLyrics = false
+                        }
+                    }
+                }
+            }
+
             AlertDialog(
-                onDismissRequest = { showRefreshLyricsConfirm = false },
-                title = { Text("重新联网获取歌词？") },
+                onDismissRequest = { showLyricsSelectorDialog = false },
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Refresh, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("多源歌词精准选择", fontWeight = FontWeight.Bold)
+                    }
+                },
                 text = {
-                    Column {
-                        Text("将清除本地缓存并重新搜索。如已删除过错误歌词，系统会自动跳过被标记的结果。")
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { dontAskAgain = !dontAskAgain }
-                        ) {
-                            Checkbox(checked = dontAskAgain, onCheckedChange = { dontAskAgain = it })
-                            Spacer(Modifier.width(4.dp))
-                            Text("不再弹出确认", style = MaterialTheme.typography.bodySmall)
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Search bar
+                        OutlinedTextField(
+                            value = lyricsSearchKeyword,
+                            onValueChange = { lyricsSearchKeyword = it },
+                            label = { Text("搜索关键词") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        isSearchingLyrics = true
+                                        scope.launch(Dispatchers.IO) {
+                                            val keyword = lyricsSearchKeyword
+                                            val jobs = listOf(
+                                                async { runCatching { NeteaseLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                                                async { runCatching { QQMusicLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                                                async { runCatching { KuGouLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                                                async { runCatching { LrcLibLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) }
+                                            )
+                                            val results = jobs.awaitAll()
+                                            val grouped = mapOf(
+                                                "网易云" to results[0],
+                                                "QQ音乐" to results[1],
+                                                "酷狗" to results[2],
+                                                "LrcLib" to results[3]
+                                            )
+                                            withContext(Dispatchers.Main) {
+                                                lyricsCandidatesGrouped = grouped
+                                                isSearchingLyrics = false
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = "搜索")
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        Spacer(Modifier.height(16.dp))
+
+                        if (isSearchingLyrics) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator()
+                                Spacer(Modifier.height(12.dp))
+                                Text("正在并发抓取多平台歌词...", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else {
+                            val allPlatforms = listOf("网易云", "QQ音乐", "酷狗", "LrcLib")
+                            val hasResults = lyricsCandidatesGrouped.values.any { it.isNotEmpty() }
+
+                            if (!hasResults) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text("未找到任何匹配的歌词，请更换关键词搜索", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .heightIn(max = 300.dp)
+                                ) {
+                                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                        // 🌟 Recommendation section (Top 3 highest score overall)
+                                        val recommended = lyricsCandidatesGrouped.values
+                                            .flatten()
+                                            .sortedByDescending { it.score }
+                                            .take(3)
+
+                                        if (recommended.isNotEmpty()) {
+                                            Text("✨ 智能综合推荐", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                            Spacer(Modifier.height(8.dp))
+                                            recommended.forEach { candidate ->
+                                                LyricCandidateRow(
+                                                    candidate = candidate,
+                                                    isApplying = applyingCandidateId == "${candidate.platform}_${candidate.id}",
+                                                    onSelect = {
+                                                        applyingCandidateId = "${candidate.platform}_${candidate.id}"
+                                                        scope.launch(Dispatchers.IO) {
+                                                            val raw = when (candidate.platform) {
+                                                                "网易云" -> NeteaseLyricsFetcher.fetchLyric(candidate.id)
+                                                                "QQ音乐" -> QQMusicLyricsFetcher.fetchLyric(candidate.id)
+                                                                "酷狗" -> KuGouLyricsFetcher.fetchLyric(candidate.id)
+                                                                "LrcLib" -> if (candidate.previewLrc.isNotEmpty()) candidate.previewLrc else LrcLibLyricsFetcher.fetchLyric(candidate.id)
+                                                                else -> null
+                                                            }
+                                                            if (raw != null) {
+                                                                val parsed = LrcParser.parseRaw(raw)
+                                                                val src = when (candidate.platform) {
+                                                                    "网易云" -> LyricsSource.NETEASE
+                                                                    "QQ音乐" -> LyricsSource.QQ
+                                                                    "酷狗" -> LyricsSource.KUGOU
+                                                                    "LrcLib" -> LyricsSource.LRCLIB
+                                                                    else -> LyricsSource.NONE
+                                                                }
+                                                                val res = LyricsResult(parsed, src, raw)
+                                                                OnlineLyricsRepository.updateCacheMemoryAndDisk(audioPath, res, context)
+                                                                withContext(Dispatchers.Main) {
+                                                                    lrcLines = parsed
+                                                                    lyricsSource = src
+                                                                    showLyricsSelectorDialog = false
+                                                                    applyingCandidateId = null
+                                                                    android.widget.Toast.makeText(context, "歌词成功应用自 [${candidate.platform}]！", android.widget.Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            } else {
+                                                                withContext(Dispatchers.Main) {
+                                                                    applyingCandidateId = null
+                                                                    android.widget.Toast.makeText(context, "歌词获取失败，请尝试其他选项", android.widget.Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                            }
+                                            Spacer(Modifier.height(16.dp))
+                                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
+                                            Spacer(Modifier.height(16.dp))
+                                        }
+
+                                        // Platform categorized sections
+                                        allPlatforms.forEach { platform ->
+                                            val candidates = lyricsCandidatesGrouped[platform] ?: emptyList()
+                                            if (candidates.isNotEmpty()) {
+                                                val isExpanded = expandedPlatforms[platform] ?: false
+                                                val visibleCandidates = if (isExpanded) candidates.take(10) else candidates.take(3)
+
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "$platform (${candidates.size})",
+                                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                    if (candidates.size > 3) {
+                                                        TextButton(onClick = { expandedPlatforms[platform] = !isExpanded }) {
+                                                            Text(if (isExpanded) "收起" else "展开更多")
+                                                        }
+                                                    }
+                                                }
+
+                                                visibleCandidates.forEach { candidate ->
+                                                    LyricCandidateRow(
+                                                        candidate = candidate,
+                                                        isApplying = applyingCandidateId == "${candidate.platform}_${candidate.id}",
+                                                        onSelect = {
+                                                            applyingCandidateId = "${candidate.platform}_${candidate.id}"
+                                                            scope.launch(Dispatchers.IO) {
+                                                                val raw = when (candidate.platform) {
+                                                                    "网易云" -> NeteaseLyricsFetcher.fetchLyric(candidate.id)
+                                                                    "QQ音乐" -> QQMusicLyricsFetcher.fetchLyric(candidate.id)
+                                                                    "酷狗" -> KuGouLyricsFetcher.fetchLyric(candidate.id)
+                                                                    "LrcLib" -> if (candidate.previewLrc.isNotEmpty()) candidate.previewLrc else LrcLibLyricsFetcher.fetchLyric(candidate.id)
+                                                                    else -> null
+                                                                }
+                                                                if (raw != null) {
+                                                                    val parsed = LrcParser.parseRaw(raw)
+                                                                    val src = when (candidate.platform) {
+                                                                        "网易云" -> LyricsSource.NETEASE
+                                                                        "QQ音乐" -> LyricsSource.QQ
+                                                                        "酷狗" -> LyricsSource.KUGOU
+                                                                        "LrcLib" -> LyricsSource.LRCLIB
+                                                                        else -> LyricsSource.NONE
+                                                                    }
+                                                                    val res = LyricsResult(parsed, src, raw)
+                                                                    OnlineLyricsRepository.updateCacheMemoryAndDisk(audioPath, res, context)
+                                                                    withContext(Dispatchers.Main) {
+                                                                        lrcLines = parsed
+                                                                        lyricsSource = src
+                                                                        showLyricsSelectorDialog = false
+                                                                        applyingCandidateId = null
+                                                                        android.widget.Toast.makeText(context, "歌词成功应用自 [${candidate.platform}]！", android.widget.Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                } else {
+                                                                    withContext(Dispatchers.Main) {
+                                                                        applyingCandidateId = null
+                                                                        android.widget.Toast.makeText(context, "歌词获取失败，请尝试其他选项", android.widget.Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                    Spacer(Modifier.height(8.dp))
+                                                }
+                                                Spacer(Modifier.height(8.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        if (dontAskAgain) {
-                            prefs.edit().putBoolean(prefKeySkipRefresh, true).apply()
-                            skipRefreshConfirm = true
-                        }
-                        showRefreshLyricsConfirm = false
-                        doRefreshLyrics()
-                    }) {
-                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("确认刷新")
+                    TextButton(onClick = { showLyricsSelectorDialog = false }) { Text("关闭") }
+                }
+            )
+        }
+
+        // ── 多源封面选择弹窗 ──────────────────────────────────────────────────────
+        if (showCoverSelectorDialog) {
+            LaunchedEffect(showCoverSelectorDialog) {
+                if (showCoverSelectorDialog && coverSearchKeyword.isEmpty()) {
+                    val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                    val safeTitle = dbSong?.title ?: title
+                    val safeArtist = dbSong?.artist ?: artist
+                    coverSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != "未知歌手") "$safeArtist $safeTitle" else safeTitle
+                    isSearchingCovers = true
+                    scope.launch(Dispatchers.IO) {
+                        coverCandidates = CoverFetcher.searchCoverCandidates(safeTitle, safeArtist)
+                        withContext(Dispatchers.Main) { isSearchingCovers = false }
+                    }
+                }
+            }
+
+            AlertDialog(
+                onDismissRequest = { showCoverSelectorDialog = false },
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Image, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("选择封面", fontWeight = FontWeight.Bold)
                     }
                 },
+                text = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = coverSearchKeyword,
+                            onValueChange = { coverSearchKeyword = it },
+                            label = { Text("搜索关键词") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    isSearchingCovers = true
+                                    scope.launch(Dispatchers.IO) {
+                                        val parts = coverSearchKeyword.split(" ", limit = 2)
+                                        val t = parts.last()
+                                        val a = if (parts.size > 1) parts.first() else ""
+                                        coverCandidates = CoverFetcher.searchCoverCandidates(t, a)
+                                        withContext(Dispatchers.Main) { isSearchingCovers = false }
+                                    }
+                                }) { Icon(Icons.Default.Search, contentDescription = "搜索") }
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        if (isSearchingCovers) {
+                            Column(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                CircularProgressIndicator()
+                                Spacer(Modifier.height(12.dp))
+                                Text("正在并发抓取多平台封面...", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else {
+                            if (coverCandidates.isEmpty()) {
+                                Column(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                    Text("未找到任何封面", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } else {
+                                Box(modifier = Modifier.weight(1f, fill = false).heightIn(max = 400.dp)) {
+                                    androidx.compose.foundation.lazy.LazyColumn {
+                                        items(coverCandidates.size) { i ->
+                                            val candidate = coverCandidates[i]
+                                            var candidateBitmap by remember(candidate.imageUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                                            LaunchedEffect(candidate.imageUrl) {
+                                                withContext(Dispatchers.IO) {
+                                                    val bmp = CoverFetcher.downloadBitmap(candidate.imageUrl)
+                                                    if (bmp != null) {
+                                                        candidateBitmap = bmp.asImageBitmap()
+                                                    }
+                                                }
+                                            }
+                                            Row(
+                                                modifier = Modifier.clickable {
+                                                    scope.launch(Dispatchers.IO) {
+                                                        val bitmap = CoverFetcher.downloadBitmap(candidate.imageUrl)
+                                                        if (bitmap != null) {
+                                                            CoverArtCache.saveBitmap(context, audioPath, bitmap)
+                                                            AudioCache.putCoverInMemory(audioPath, bitmap.asImageBitmap())
+                                                            withContext(Dispatchers.Main) {
+                                                                coverForceNetwork = true
+                                                                coverRefreshNonce++
+                                                                PlayerStateHolder.updateFromBitmap(bitmap, audioPath)
+
+                                                                // ✨ 完美解决：利用 Media3 官方原生就地无感热替换接口
+                                                                // 清理掉会导致重缓冲和引发断音卡顿的 seekTo 与 play 方法！
+                                                                // 这样既清空了所有不存在的 platformSession 编译红字，又实现了 100% 丝滑不卡顿的在线换图
+                                                                mediaController?.let { controller ->
+                                                                    val currentIndex = controller.currentMediaItemIndex
+                                                                    val currentItem = controller.currentMediaItem
+                                                                    if (currentItem != null) {
+                                                                        val updatedMetadata = currentItem.mediaMetadata.buildUpon()
+                                                                            .setArtworkUri(android.net.Uri.parse("auralis://cover?path=${android.net.Uri.encode(audioPath)}&nonce=${System.currentTimeMillis()}"))
+                                                                            .build()
+                                                                        val refreshedItem = currentItem.buildUpon()
+                                                                            .setMediaMetadata(updatedMetadata)
+                                                                            .build()
+
+                                                                        // 💡 核心：只做原位置 MediaItem 属性热更替换，底层解码流不断开，声音实现绝对无缝连续！
+                                                                        controller.replaceMediaItem(currentIndex, refreshedItem)
+                                                                    }
+                                                                }
+
+                                                                android.widget.Toast.makeText(context, "封面已顺滑实时应用！❤️", android.widget.Toast.LENGTH_SHORT).show()
+                                                                showCoverSelectorDialog = false
+                                                            }
+                                                        }
+                                                    }
+                                                }.padding(vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (candidateBitmap != null) {
+                                                        Image(
+                                                            bitmap = candidateBitmap!!,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                        )
+                                                    } else {
+                                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                                    }
+                                                }
+                                                Spacer(Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(candidate.platform, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                                    Text(candidate.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                                    Text("${candidate.artist} - ${candidate.album}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showRefreshLyricsConfirm = false }) { Text("取消") }
+                    TextButton(onClick = { showCoverSelectorDialog = false }) { Text("关闭") }
                 }
             )
         }
@@ -1921,3 +2354,80 @@ fun AnimatedEqIcon(isPlaying: Boolean, modifier: Modifier = Modifier, tint: Colo
         Box(modifier = Modifier.width(3.dp).fillMaxHeight(h3.value).background(tint, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)))
     }
 }
+
+@Composable
+fun LyricCandidateRow(
+    candidate: LyricCandidate,
+    isApplying: Boolean,
+    onSelect: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isApplying, onClick = onSelect),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = candidate.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = candidate.platform,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "${candidate.artist} - ${candidate.album}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (candidate.durationSec > 0) {
+                    Spacer(Modifier.height(2.dp))
+                    val mins = candidate.durationSec / 60
+                    val secs = candidate.durationSec % 60
+                    Text(
+                        text = "时长: $mins:${String.format(Locale.getDefault(), "%02d", secs)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            if (isApplying) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = "选择并应用",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+

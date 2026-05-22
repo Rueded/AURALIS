@@ -245,10 +245,25 @@ fun SettingsScreen(
                         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Text("优先来源", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                // ✨ 恢复“自动”，并改为网易云和酷狗！
-                                listOf("auto" to "自动", "163" to "网易云", "kugou" to "酷狗").forEach { (key, label) ->
-                                    FilterChip(selected = onlineLyricsSource == key, onClick = { onlineLyricsSource = key; prefs.edit().putString("online_lyrics_source", key).apply() }, label = { Text(label, fontSize = 12.sp) })
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                listOf(
+                                    "auto" to "自动",
+                                    "163" to "网易云",
+                                    "qq" to "QQ音乐",
+                                    "kugou" to "酷狗",
+                                    "lrclib" to "LrcLib"
+                                ).forEach { (key, label) ->
+                                    FilterChip(
+                                        selected = onlineLyricsSource == key,
+                                        onClick = {
+                                            onlineLyricsSource = key
+                                            prefs.edit().putString("online_lyrics_source", key).apply()
+                                        },
+                                        label = { Text(label, fontSize = 12.sp) }
+                                    )
                                 }
                             }
                         }
