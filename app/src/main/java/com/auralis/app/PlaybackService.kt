@@ -479,6 +479,16 @@ class PlaybackService : MediaSessionService() {
                 android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
             )
 
+        // ✅ 修复核心：原来的 override 只处理 artworkData，artworkUri 被完全忽略
+        // 正确逻辑：artworkData 优先，没有则走 artworkUri → loadBitmap(uri)
+        override fun loadBitmapFromMetadata(metadata: MediaMetadata): ListenableFuture<Bitmap>? {
+            return when {
+                metadata.artworkData != null -> decodeBitmap(metadata.artworkData!!)
+                metadata.artworkUri != null -> loadBitmap(metadata.artworkUri!!)
+                else -> null
+            }
+        }
+
         override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
             val uriStr = uri.toString()
             val future = com.google.common.util.concurrent.SettableFuture.create<Bitmap>()
@@ -486,7 +496,7 @@ class PlaybackService : MediaSessionService() {
             serviceScope.launch {
                 var finalBitmap: Bitmap? = null
                 try {
-                    // 1. 原生系统本地媒体库封面文件流
+                    // 1. 原生 content:// 本地媒体库封面（系统分配的封面 URI）
                     if (uriStr.startsWith("content://")) {
                         try {
                             this@PlaybackService.contentResolver.openInputStream(uri).use { stream ->
@@ -495,14 +505,14 @@ class PlaybackService : MediaSessionService() {
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.e("PlaybackService", "本地 Content 协议封面流读取失败: ${e.message}")
+                            Log.e("PlaybackService", "Content URI 封面读取失败: ${e.message}")
                         }
                     }
-                    // 2. 拦截私有高精度标志
+                    // 2. 拦截私有 auralis://cover 协议（本地歌曲，走多层回退链）
                     else if (uriStr.startsWith("auralis://cover")) {
                         val path = uri.getQueryParameter("path") ?: ""
                         if (path.isNotEmpty()) {
-                            // 2a. 提取内嵌音频元数据封面
+                            // 2a. 提取音频文件内嵌封面
                             try {
                                 val retriever = android.media.MediaMetadataRetriever()
                                 retriever.setDataSource(path)
@@ -510,67 +520,80 @@ class PlaybackService : MediaSessionService() {
                                 retriever.release()
                                 if (pic != null) {
                                     finalBitmap = android.graphics.BitmapFactory.decodeByteArray(pic, 0, pic.size)
+                                    Log.d("PlaybackService", "✅ 内嵌封面解析成功")
                                 }
                             } catch (e: Exception) {
-                                Log.w("PlaybackService", "内嵌封面解析落空: ${e.message}")
+                                Log.w("PlaybackService", "内嵌封面解析失败: ${e.message}")
                             }
 
-                            // 2b. 读取磁盘 WebP 缓存
+                            // 2b. 读取 App 磁盘 WebP 缓存
                             if (finalBitmap == null) {
                                 finalBitmap = CoverArtCache.loadBitmapFromDisk(this@PlaybackService, path)
+                                if (finalBitmap != null) Log.d("PlaybackService", "✅ 磁盘缓存封面命中")
                             }
 
-                            // 2c. 系统 MediaStore 异步匹配
+                            // 2c. 系统 MediaStore 匹配
                             if (finalBitmap == null) {
                                 finalBitmap = CoverArtCache.loadAlbumArtFromMediaStore(this@PlaybackService, path)
+                                if (finalBitmap != null) Log.d("PlaybackService", "✅ MediaStore 封面命中")
                             }
 
-                            // 2d. 调用网易云网络引擎补全
+                            // 2d. 网络引擎兜底（网易云优先 → QQ 音乐 → 其他）
                             if (finalBitmap == null) {
-                                val song = AppDatabase.getDatabase(this@PlaybackService).songDao().getSongByPath(path)
-                                if (song != null) {
-                                    val fetched = CoverFetcher.fetchHighResCover(song.title, song.artist)
-                                    if (fetched != null) {
-                                        finalBitmap = fetched
-                                        CoverArtCache.saveBitmap(this@PlaybackService, path, fetched)
+                                try {
+                                    val song = AppDatabase.getDatabase(this@PlaybackService)
+                                        .songDao().getSongByPath(path)
+                                    if (song != null) {
+                                        val fetched = CoverFetcher.fetchHighResCover(song.title, song.artist)
+                                        if (fetched != null) {
+                                            finalBitmap = fetched
+                                            CoverArtCache.saveBitmap(this@PlaybackService, path, fetched)
+                                            Log.d("PlaybackService", "✅ 网络封面拉取成功并写入缓存")
+                                        }
                                     }
+                                } catch (e: Exception) {
+                                    Log.w("PlaybackService", "网络封面拉取异常: ${e.message}")
                                 }
                             }
                         }
                     }
-                    // 3. 常规直链回滚至默认加载器
-                    else {
-                        val defaultFuture = defaultLoader.loadBitmap(uri)
+                    // 3. HTTP/HTTPS 直链（网络图片 URL，不经 auralis 协议）
+                    else if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
                         try {
-                            finalBitmap = defaultFuture.get()
+                            finalBitmap = CoverFetcher.downloadBitmap(uriStr)
+                            if (finalBitmap != null) Log.d("PlaybackService", "✅ HTTP 直链封面下载成功")
                         } catch (e: Exception) {
-                            Log.w("PlaybackService", "默认加载器直链拉取落空: ${e.message}")
+                            Log.w("PlaybackService", "HTTP 直链封面下载失败: ${e.message}")
+                        }
+                    }
+                    // 4. 其他协议：尝试系统默认加载器（带超时保护）
+                    else {
+                        try {
+                            val defaultFuture = defaultLoader.loadBitmap(uri)
+                            // ✅ 修复：原来无超时 .get() 可能永久阻塞，改为 5 秒超时
+                            finalBitmap = defaultFuture.get(5, java.util.concurrent.TimeUnit.SECONDS)
+                        } catch (e: Exception) {
+                            Log.w("PlaybackService", "默认加载器回退失败: ${e.message}")
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e("PlaybackService", "异步封面拦截链路核心层异常: ${e.message}")
+                    Log.e("PlaybackService", "封面加载链路异常: ${e.message}")
                 } finally {
-                    // ✨【核心解错：绝对防御】若所有链路彻底解析不到图片，解码内置默认图标返回，绝不给通知栏交付 Exception
+                    // 绝对兜底：所有链路都失败时返回内置默认图，绝不给通知栏传 null
                     if (finalBitmap == null) {
-                        try {
-                            finalBitmap = android.graphics.BitmapFactory.decodeResource(
+                        finalBitmap = try {
+                            android.graphics.BitmapFactory.decodeResource(
                                 this@PlaybackService.resources,
                                 R.drawable.ic_notification_logo
                             )
                         } catch (e: Exception) {
-                            // 极极端兜底：构建 1x1 像素透明图，确保通知引擎常青
-                            finalBitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
                         }
                     }
                     future.set(finalBitmap)
                 }
             }
             return future
-        }
-
-        override fun loadBitmapFromMetadata(metadata: MediaMetadata): ListenableFuture<Bitmap>? {
-            val data = metadata.artworkData ?: return null
-            return decodeBitmap(data)
         }
     }
 
