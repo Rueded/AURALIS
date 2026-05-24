@@ -62,3 +62,14 @@ data class EqPreset(
     val name: String,
     val bandLevels: String // 存储为逗号分隔的字符串，例如 "100,200,-50,0,300"
 )
+
+// Room 查询辅助数据类（不是数据库表，不加 @Entity）
+data class MonthCount(
+    val month: String,  // "01" ~ "12"
+    val count: Int
+)
+
+data class DayCount(
+    val day: String,    // "01" ~ "31"
+    val count: Int
+)

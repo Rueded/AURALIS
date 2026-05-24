@@ -218,7 +218,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     }
 
     // 👇 修改 1：引入 PagerState，废弃原本的 selectedTab
-    val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "专辑列表", "歌手聚合", "我的歌单")
+    val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "专辑列表", "歌手聚合", "我的歌单", "收听足迹")
     val pagerState = rememberPagerState(pageCount = { tabs.size })
 
     val qualityKeywordMap = mapOf(
@@ -984,6 +984,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 }
                                 BackHandler(enabled = selectedPlaylist != null) { selectedPlaylist = null }
                             }
+                        }
+
+                        6 -> {
+                            HistoryScreen(onBack = {
+                                scope.launch { pagerState.animateScrollToPage(0) }
+                            })
                         }
                     }
                 }

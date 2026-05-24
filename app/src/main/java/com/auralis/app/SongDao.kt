@@ -36,6 +36,63 @@ interface SongDao {
     @Query("SELECT COUNT(*) FROM play_history WHERE timestamp BETWEEN :start AND :end")
     suspend fun getPlayCountInPeriod(start: Long, end: Long): Int
 
+    // 获取某年所有月份的播放次数（用于年度柱状图）
+    @Query("""
+    SELECT COUNT(*) FROM play_history 
+    WHERE timestamp >= :yearStart AND timestamp < :yearEnd
+""")
+    suspend fun getTotalPlaysInYear(yearStart: Long, yearEnd: Long): Int
+
+    // 按月聚合：某年每个月的播放次数
+    @Query("""
+    SELECT strftime('%m', datetime(timestamp/1000, 'unixepoch', 'localtime')) as month,
+           COUNT(*) as count
+    FROM play_history
+    WHERE timestamp >= :yearStart AND timestamp < :yearEnd
+    GROUP BY month
+    ORDER BY month ASC
+""")
+    suspend fun getMonthlyPlayCounts(yearStart: Long, yearEnd: Long): List<MonthCount>
+
+    // 某月播放次数最多的歌曲 TOP N
+    @Query("""
+    SELECT songs.*, COUNT(play_history.id) as cnt
+    FROM play_history
+    INNER JOIN songs ON songs.data = play_history.songPath
+    WHERE play_history.timestamp >= :start AND play_history.timestamp < :end
+    GROUP BY play_history.songPath
+    ORDER BY cnt DESC
+    LIMIT :limit
+""")
+    suspend fun getTopSongsInPeriod(start: Long, end: Long, limit: Int): List<Song>
+
+    // 获取历史记录跨越的所有年份（用于年份选择器）
+    @Query("""
+    SELECT DISTINCT strftime('%Y', datetime(timestamp/1000, 'unixepoch', 'localtime')) as year
+    FROM play_history
+    ORDER BY year DESC
+""")
+    suspend fun getDistinctYears(): List<String>
+
+    // 获取某年某月的每日播放次数（用于月历热力图）
+    @Query("""
+    SELECT strftime('%d', datetime(timestamp/1000, 'unixepoch', 'localtime')) as day,
+           COUNT(*) as count
+    FROM play_history
+    WHERE timestamp >= :start AND timestamp < :end
+    GROUP BY day
+    ORDER BY day ASC
+""")
+    suspend fun getDailyPlayCounts(start: Long, end: Long): List<DayCount>
+
+    // 总计：历史记录总条数（用于"共听了X首次"展示）
+    @Query("SELECT COUNT(*) FROM play_history")
+    suspend fun getTotalHistoryCount(): Int
+
+    // 总计：累计收听时长（毫秒）
+    @Query("SELECT SUM(durationListened) FROM play_history")
+    suspend fun getTotalListenedMs(): Long?
+
     // ── 歌单管理 (新增) ──
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun createPlaylist(playlist: Playlist): Long
