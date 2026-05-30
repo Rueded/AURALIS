@@ -18,6 +18,9 @@ object LrcParser {
         return try { parseRaw(lrcFile.readText()) } catch (_: Exception) { emptyList() }
     }
 
+    /** 判断两行是否同属一个「双语组」（时间戳相差 ≤ 50ms 视为配对） */
+    fun isSamePair(a: LrcLine, b: LrcLine) = kotlin.math.abs(a.timeMs - b.timeMs) <= 50L
+
     /** 从字符串解析（供 OnlineLyricsRepository 使用） */
     fun parseRaw(raw: String): List<LrcLine> {
         if (raw.isBlank()) return emptyList()

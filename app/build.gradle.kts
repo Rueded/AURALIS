@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.auralis.app"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 36
-        versionCode = 7
-        versionName = "6.0"
+        versionCode = 8
+        versionName = "7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,6 +54,9 @@ dependencies {
     val media3Version = "1.10.0"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-session:$media3Version")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.8.1")
+    implementation("androidx.car.app:app-automotive:1.7.0-beta02")
+    implementation("androidx.car.app:app:1.7.0-beta02")
 
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

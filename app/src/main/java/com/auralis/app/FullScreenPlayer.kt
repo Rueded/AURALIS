@@ -121,7 +121,7 @@ import com.auralis.app.VisualizerData
 import com.auralis.app.PlayerStateHolder.dominantColor
 import com.auralis.app.ui.theme.AuralisTheme
 import kotlin.apply
-
+@androidx.media3.common.util.UnstableApi
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.animation.ExperimentalAnimationApi::class)
 @Composable
 fun FullScreenPlayer(
@@ -272,36 +272,15 @@ fun FullScreenPlayer(
             label = "dominantColor"
         )
 
-        val dynamicLyricActiveColor = remember(animatedDominantColor, albumPalette) {
-            val luminance = animatedDominantColor.luminance()
 
-            if (luminance > 0.5f) {
-                // ✨【浅色背景】
-                // 保留专辑主色，但轻微向白色混合
-                // 这样既能维持专辑主题感，又不会暗到看不清歌词
-                val primaryColor = albumPalette?.primary ?: Color(0xFF4A4A4A)
-
-                androidx.compose.ui.graphics.lerp(
-                    primaryColor,
-                    Color.White,
-                    0.25f
-                )
-            } else {
-                // ✨【深色背景】
-                // 使用优化后的 accent 高亮色
-                // 同时稍微提高透明度，让歌词更亮、更清晰
-                (albumPalette?.accent ?: Color(0xFFF2E6CE))
-                    .copy(alpha = 0.95f)
-            }
+        val currentLyricIndex = remember(currentPosition, lrcLines) {
+            if (lrcLines.isEmpty()) -1
+            else lrcLines.indexOfLast { it.timeMs <= currentPosition }.coerceAtLeast(0)
         }
 
-
-        val currentLyricIndex = remember(
-            currentPosition,
-            lrcLines
-        ) {
-            if (lrcLines.isEmpty()) -1 else lrcLines.indexOfLast { it.timeMs <= currentPosition }
-                .coerceAtLeast(0)
+// 当前激活的时间戳（用于让同时间戳的所有行都高亮）
+        val currentActiveTimeMs = remember(currentLyricIndex, lrcLines) {
+            lrcLines.getOrNull(currentLyricIndex)?.timeMs ?: -1L
         }
         val centerOffset =
             if (isFullscreenLyrics) 3 else if (isLandscape) (if (isCompactLandscape) 1 else 3) else 1
@@ -1022,10 +1001,9 @@ fun FullScreenPlayer(
                                     LyricLineItem(
                                         text = line.text,
                                         timeMs = line.timeMs,
-                                        isCurrent = index == currentLyricIndex,
+                                        isCurrent = lrcLines.getOrNull(index)?.timeMs == currentActiveTimeMs && currentActiveTimeMs >= 0L,
                                         isPausedForInteraction = isLyricsPausedForInteraction,
                                         fontSizeSp = lyricsFontSize,
-                                        activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                         onSeek = {
                                             mediaController?.seekTo(line.timeMs)
                                             currentPosition = line.timeMs
@@ -1213,10 +1191,9 @@ fun FullScreenPlayer(
                                                 LyricLineItem(
                                                     text = line.text,
                                                     timeMs = line.timeMs,
-                                                    isCurrent = index == currentLyricIndex,
+                                                    isCurrent = lrcLines.getOrNull(index)?.timeMs == currentActiveTimeMs && currentActiveTimeMs >= 0L,
                                                     isPausedForInteraction = isLyricsPausedForInteraction,
                                                     fontSizeSp = lyricsFontSize,
-                                                    activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                                     onSeek = {
                                                         mediaController?.seekTo(line.timeMs)
                                                         currentPosition = line.timeMs
@@ -1381,10 +1358,9 @@ fun FullScreenPlayer(
                                     LyricLineItem(
                                         text = line.text,
                                         timeMs = line.timeMs,
-                                        isCurrent = index == currentLyricIndex,
+                                        isCurrent = lrcLines.getOrNull(index)?.timeMs == currentActiveTimeMs && currentActiveTimeMs >= 0L,
                                         isPausedForInteraction = isLyricsPausedForInteraction,
                                         fontSizeSp = lyricsFontSize,
-                                        activeColor = dynamicLyricActiveColor, // 👈 完美接入自适应颜色变幻
                                         onSeek = {
                                             mediaController?.seekTo(line.timeMs)
                                             currentPosition = line.timeMs
