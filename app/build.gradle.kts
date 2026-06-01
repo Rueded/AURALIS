@@ -13,8 +13,8 @@ android {
         applicationId = "com.auralis.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "7.5"
+        versionCode = 10
+        versionName = "8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -71,6 +71,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("net.jthink:jaudiotagger:3.0.1")
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -296,7 +296,8 @@ fun SongItemUI(
     onPlayNext: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onRemoveFromPlaylist: (() -> Unit)? = null,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onShareToNearby: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -371,6 +372,13 @@ fun SongItemUI(
             leadingIcon = { Icon(Icons.Filled.Subtitles, null) },
             onClick = { closeAllMenus(); lrcPickerLauncher.launch("*/*") }
         )
+        if (onShareToNearby != null) {
+            DropdownMenuItem(
+                text = { Text("分享给附近设备") },
+                leadingIcon = { Icon(Icons.Filled.Wifi, null) },
+                onClick = { closeAllMenus(); onShareToNearby() }
+            )
+        }
         HorizontalDivider()
         DropdownMenuItem(
             text = { Text("彻底删除文件", color = MaterialTheme.colorScheme.error) },

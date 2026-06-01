@@ -53,7 +53,8 @@ fun SettingsScreen(
     pcServerIp: String, onPcServerIpChange: (String) -> Unit,
     savedFolderUriStr: String?, onPickFolder: () -> Unit,
     allowedFolders: Set<String>, onFolderAdded: (String) -> Unit, onFolderRemoved: (String) -> Unit,
-    onRescanLibrary: () -> Unit, onBatchImportLrc: () -> Unit, onShowSleepTimer: () -> Unit, onFindDuplicates: () -> Unit
+    onRescanLibrary: () -> Unit, onBatchImportLrc: () -> Unit, onShowSleepTimer: () -> Unit, onFindDuplicates: () -> Unit,
+    onNearbyDevices: () -> Unit, onAbout: () -> Unit
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -299,11 +300,45 @@ fun SettingsScreen(
                 SettingsDivider()
                 SettingsClickRow(icon = Icons.Outlined.FolderSpecial, iconTint = syncColor, title = "同步保存路径", subtitle = if (savedFolderUriStr != null) "已配置" else "尚未设置下载位置", onClick = onPickFolder)
                 SettingsDivider()
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text("电脑局域网 IP") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) }
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text("电脑局域网 IP") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    SettingsDivider()
+// 接收开关
+                    var receiveEnabled by remember {
+                        mutableStateOf(prefs.getBoolean("auralis_receive_enabled", true))
+                    }
+                    SettingToggleRow(
+                        item = SettingToggleItem(
+                            icon     = Icons.Outlined.Inbox,
+                            iconTint = syncColor,
+                            title    = "接受附近设备推送",
+                            subtitle = if (receiveEnabled) "有设备分享歌曲时会弹出提示" else "已关闭，不接受任何传入请求",
+                            checked  = receiveEnabled,
+                            onToggle = {
+                                receiveEnabled = it
+                                prefs.edit().putBoolean("auralis_receive_enabled", it).apply()
+                            }
+                        )
+                    )
+                    SettingsDivider()
+                    SettingsClickRow(
+                        icon     = Icons.Outlined.Wifi,
+                        iconTint = syncColor,
+                        title    = "附近的 Auralis",
+                        subtitle = "在同一 WiFi 下与其他设备互传歌曲",
+                        onClick  = onNearbyDevices
+                    )}
             }
 
             SettingsSection("其他", Icons.Outlined.MoreHoriz, MaterialTheme.colorScheme.outline) {
                 SettingsClickRow(icon = Icons.Outlined.Bedtime, iconTint = Color(0xFF5C6BC0), title = "睡眠定时器", subtitle = "定时暂停播放", onClick = onShowSleepTimer)
+                SettingsDivider()
+                SettingsClickRow(
+                    icon     = Icons.Outlined.Info,
+                    iconTint = MaterialTheme.colorScheme.outline,
+                    title    = "关于 Auralis",
+                    subtitle = "版本 7.5 · 设备昵称与 ID 管理",
+                    onClick  = onAbout
+                )
             }
             Spacer(Modifier.height(32.dp))
         }

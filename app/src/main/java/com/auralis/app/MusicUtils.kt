@@ -72,13 +72,13 @@ object MusicUtils {
                     val albumId = cursor.getLong(albumIdCol)
 
                     // 3. 【核心修正】：如果系统给的数据不靠谱，App 自己搜身
-                    if (size <= 0L) {
-                        size = file.length() // 物理大小永远最真实
-                    }
+                    // ✅ 始终用物理文件大小，MediaStore 的值不可靠
+                    size = file.length().takeIf { it > 0L } ?: size
 
                     val existingSong = songDao.getSongByPath(data)
                     // 只有当是新歌，或者文件被改动过，才走耗时的 jaudiotagger 解析
-                    if (existingSong == null || existingSong.dateModified < dateModified) {
+                    // ✅ 修复：dateModified 为 0 时（MediaStore 延迟）也强制重扫，确保 size 正确
+                    if (existingSong == null || existingSong.dateModified < dateModified || existingSong.size <= 0L) {
 
                         var gain = 0f
                         var bits = 16

@@ -8,9 +8,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SongDao {
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongs(songs: List<Song>)
-
     @Query("SELECT * FROM songs ORDER BY title ASC")
     fun getAllSongs(): Flow<List<Song>>
 

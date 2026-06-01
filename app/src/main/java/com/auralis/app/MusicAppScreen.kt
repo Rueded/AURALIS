@@ -118,6 +118,7 @@ import com.auralis.app.ui.theme.AuralisTheme
 import kotlin.apply
 
 // ==========================================
+@androidx.media3.common.util.UnstableApi
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
@@ -177,6 +178,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var showNewPlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var songToShareToNearby by remember { mutableStateOf<Song?>(null) }
 
     LaunchedEffect(isScrolling) {
         if (isScrolling) {
@@ -234,6 +236,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     )
 
     var showSettingsScreen by remember { mutableStateOf(false) }
+    var showNearbyScreen by remember { mutableStateOf(false) }
+    var showAboutScreen  by remember { mutableStateOf(false) }
     var showSelectionDialog by remember { mutableStateOf(false) }
     var showDownloadingDialog by remember { mutableStateOf(false) }
     var missingSongsList by remember { mutableStateOf<List<SyncItem>>(emptyList()) }
@@ -455,6 +459,19 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     LaunchedEffect(Unit) {
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+
+        // 启动 Auralis 局域网服务
+        withContext(Dispatchers.IO) {
+            try {
+                AuralisServer(context).start()
+                NsdHelper.register(context)
+                // ✅ 应用启动就开始扫描，而不是等打开 NearbyScreen 才扫
+                NsdHelper.startDiscovery(context)
+            } catch (e: Exception) {
+                android.util.Log.e("MusicApp", "AuralisServer 启动失败: ${e.message}")
+            }
+        }
+
         controllerFuture.addListener({
             val controller = controllerFuture.get()
             mediaController = controller
@@ -791,7 +808,17 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                 onClick = { onSongClickAction(song, index, currentProcessedSongs) },
                                                 onPlayNext = { onSongPlayNextAction(song) },
                                                 onAddToPlaylist = { songToAddToPlaylist = song },
-                                                onDelete = { onSongDeleteAction(song) }
+                                                onDelete = { onSongDeleteAction(song) },
+                                                        onShareToNearby = {
+                                                    scope.launch {
+                                                        val liveDevices = NsdHelper.discovered.value
+                                                        if (liveDevices.isEmpty()) {
+                                                            Toast.makeText(context, "附近没有在线的 Auralis 设备", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            songToShareToNearby = song
+                                                        }
+                                                    }
+                                                }
                                             )
                                         }
                                     }
@@ -1170,12 +1197,89 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             }
                         }
                     }
-                }
+                },
+                onNearbyDevices = { showNearbyScreen = true; showSettingsScreen = false },
+                onAbout         = { showAboutScreen  = true; showSettingsScreen = false }
             )
             BackHandler { showSettingsScreen = false }
         }
     }
 
+    // 监听来自其他 Auralis 设备的推送
+    val incomingPush by AuralisPushManager.incoming.collectAsState()
+    incomingPush?.let { push ->
+        val receiveEnabled = prefs.getBoolean("auralis_receive_enabled", true)
+        if (receiveEnabled) {
+            var isDownloading by remember { mutableStateOf(false) }
+            var downloadProgress by remember { mutableFloatStateOf(0f) }
+
+            if (isDownloading) {
+                // 下载中：显示进度弹窗
+                AlertDialog(
+                    onDismissRequest = {},  // 下载中不能关闭
+                    shape = RoundedCornerShape(24.dp),
+                    title = { Text("接收中…", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                push.songTitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(20.dp))
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "${(downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    },
+                    confirmButton = {}
+                )
+            } else {
+                IncomingPushDialog(
+                    request  = push,
+                    onAccept = {
+                        isDownloading = true
+                        scope.launch(Dispatchers.IO) {
+                            val folder = android.os.Environment
+                                .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
+                                .absolutePath
+                            val ok = downloadFromPeer(context, push, folder) { p ->
+                                downloadProgress = p
+                            }
+                            withContext(Dispatchers.Main) {
+                                isDownloading = false
+                                AuralisPushManager.consume()
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "✅ 已接收：${push.songTitle}" else "❌ 下载失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                if (ok) scope.launch {
+                                    MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
+                                }
+                            }
+                        }
+                    },
+                    onDismiss = { AuralisPushManager.consume() }
+                )
+            }
+        } else {
+            AuralisPushManager.consume()
+        }
+    }
     if (showDuplicateDialog) {
         AlertDialog(
             onDismissRequest = { showDuplicateDialog = false },
@@ -1318,6 +1422,37 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }
             },
             confirmButton = { TextButton(onClick = { showDuplicateDialog = false }) { Text("关闭") } }
+        )
+    }
+    // ── Nearby Screen ─────────────────────────────────────────
+    androidx.compose.animation.AnimatedVisibility(
+        visible = showNearbyScreen,
+        enter = slideInHorizontally { it },
+        exit  = slideOutHorizontally { it }
+    ) {
+        NearbyScreen(
+            onBack      = { showNearbyScreen = false },
+            currentSong = allSongs.firstOrNull {
+                it.data == (mediaController?.currentMediaItem?.mediaId ?: "")
+            }
+        )
+        BackHandler { showNearbyScreen = false }
+    }
+
+// ── About Screen ─────────────────────────────────────────
+    androidx.compose.animation.AnimatedVisibility(
+        visible = showAboutScreen,
+        enter = slideInHorizontally { it },
+        exit  = slideOutHorizontally { it }
+    ) {
+        AboutScreen(onBack = { showAboutScreen = false })
+        BackHandler { showAboutScreen = false }
+    }
+    // 分享给附近设备的歌曲选择器
+    songToShareToNearby?.let { song ->
+        NearbyShareQuickSheet(
+            song = song,
+            onDismiss = { songToShareToNearby = null }
         )
     }
 

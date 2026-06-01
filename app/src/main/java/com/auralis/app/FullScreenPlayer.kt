@@ -202,6 +202,7 @@ fun FullScreenPlayer(
 
         var coverRefreshNonce by remember { mutableIntStateOf(0) }
         var coverForceNetwork by remember { mutableStateOf(false) }
+        var showShareToNearbySheet by remember { mutableStateOf(false) }
 
         LaunchedEffect(audioPath) {
             spectrogramResult = null
@@ -700,6 +701,21 @@ fun FullScreenPlayer(
                         }
                     )
                     PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
+                PlayerToolChip(
+                    label = "分享",
+                    selected = false,
+                    onClick = {
+                        scope.launch {
+                            val liveDevices = NsdHelper.discovered.value
+                            if (liveDevices.isEmpty()) {
+                                Toast.makeText(context, "附近没有在线的 Auralis 设备", Toast.LENGTH_SHORT).show()
+                            } else {
+                                showShareToNearbySheet = true
+                            }
+                        }
+                    },
+                    icon = { Icon(Icons.Filled.Wifi, null, modifier = Modifier.size(16.dp)) }
+                )
                     PlayerToolChip(
                         label = "定时",
                         selected = sleepTimerSeconds > 0,
@@ -1662,6 +1678,19 @@ fun FullScreenPlayer(
             }
         )
         if (showEqDialog) EqDialog(onDismiss = { showEqDialog = false })
+        if (showShareToNearbySheet) {
+            val currentSong = remember(audioPath) {
+                kotlinx.coroutines.runBlocking {
+                    AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
+                }
+            }
+            if (currentSong != null) {
+                NearbyShareQuickSheet(
+                    song = currentSong,
+                    onDismiss = { showShareToNearbySheet = false }
+                )
+            }
+        }
 
         // ── 删除歌词确认弹窗 ──────────────────────────────────────────────────────
         if (showDeleteLyricsConfirm) {
