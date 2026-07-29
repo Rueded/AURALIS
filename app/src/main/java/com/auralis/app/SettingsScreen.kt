@@ -43,7 +43,7 @@ private data class SettingToggleItem(
     val enabled: Boolean = true,
     val onToggle: (Boolean) -> Unit
 )
-
+@androidx.media3.common.util.UnstableApi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
