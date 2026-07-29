@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.ComponentName
 import android.content.ContentUris
@@ -79,6 +80,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import com.google.gson.Gson
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.sync.Mutex
@@ -133,6 +137,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     val allSongs by dao.getAllSongs().collectAsState(initial = emptyList())
     val favSongs by dao.getFavoriteSongs().collectAsState(initial = emptyList())
     val topSongs by dao.getMostPlayedSongs().collectAsState(initial = emptyList())
+    val recentSongs by dao.getRecentlyPlayedSongs().collectAsState(initial = emptyList())
+    // 「最近常听」页的排序方式：false = 按播放次数（原本行为），true = 按最近播放时间
+    var historySortByRecent by remember { mutableStateOf(false) }
     // 👇 新增：获取所有歌单数据
     val allPlaylists by dao.getAllPlaylists().collectAsState(initial = emptyList())
     var enableReplayGain by remember { mutableStateOf(prefs.getBoolean("enable_replay_gain", false)) }
@@ -144,7 +151,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var savedFolderUriStr by remember { mutableStateOf(prefs.getString("sync_folder", null)) }
     var allowedFolders by remember { mutableStateOf(prefs.getStringSet("allowed_folders", setOf()) ?: setOf()) }
 
-    val activity = context as MainActivity
+    val activity = LocalActivity.current
     val hasPermission by activity.audioPermissionGranted
     var mediaController by remember { mutableStateOf<MediaController?>(null) }
 
@@ -152,6 +159,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var currentArtist by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var miniProgress by remember { mutableFloatStateOf(0f) }
+    var miniPositionMs by remember { mutableStateOf(0L) }
     var currentArtwork by remember { mutableStateOf<ByteArray?>(null) }
 
     var showFullScreenPlayer by rememberSaveable { mutableStateOf(false) }
@@ -195,7 +203,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             sleepTimerSeconds--
             if (sleepTimerSeconds == 0L) {
                 mediaController?.pause()
-                Toast.makeText(context, "睡眠定时器：已暂停播放 💤", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.sleep_timer_paused_toast), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -220,7 +228,15 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     }
 
     // 👇 修改 1：引入 PagerState，废弃原本的 selectedTab
-    val tabs = listOf("全部歌曲", "红心收藏", "最近常听", "专辑列表", "歌手聚合", "我的歌单", "收听足迹")
+    val tabs = listOf(
+        stringResource(R.string.tab_all_songs),
+        stringResource(R.string.tab_favorites),
+        stringResource(R.string.tab_recent),
+        stringResource(R.string.tab_albums),
+        stringResource(R.string.tab_artists),
+        stringResource(R.string.tab_playlists),
+        stringResource(R.string.tab_history)
+    )
     val pagerState = rememberPagerState(pageCount = { tabs.size })
 
     val qualityKeywordMap = mapOf(
@@ -251,7 +267,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             pendingDeleteSong?.let { song ->
                 scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
-                Toast.makeText(context, "授权删除成功", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.delete_authorized_success), Toast.LENGTH_SHORT).show()
                 // 👇 加上这行：如果是在查重页面触发了系统授权删除，删完要立刻把这首歌从查重列表里拿掉
                 duplicatesList = duplicatesList.map { g -> g.filter { it.id != song.id } }.filter { it.size > 1 }
             }
@@ -265,7 +281,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         val file = java.io.File(song.data)
         if (!file.exists()) {
             // 发现幽灵文件！提示用户并自动清理数据库
-            android.widget.Toast.makeText(context, "文件已在外部被删除，正在清理列表...", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, context.getString(R.string.file_deleted_externally_cleanup), android.widget.Toast.LENGTH_SHORT).show()
             scope.launch(Dispatchers.IO) {
                 // 从总库中删除
                 db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data))
@@ -299,15 +315,22 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             if (currentIdx != androidx.media3.common.C.INDEX_UNSET) {
                 val nextIdx = currentIdx + 1
 
+                // 0. 如果这首歌就是当前正在播放的那首，不需要做任何事，避免生成一份重复项
+                if (controller.getMediaItemAt(currentIdx).mediaId == song.data) {
+                    Toast.makeText(context, context.getString(R.string.already_next_song), Toast.LENGTH_SHORT).show()
+                    return@let
+                }
+
                 // 1. 检查：如果这首歌已经是紧挨着的下一首了，直接拦截！
                 if (nextIdx < controller.mediaItemCount && controller.getMediaItemAt(nextIdx).mediaId == song.data) {
-                    Toast.makeText(context, "已经是下一首啦", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.already_next_song), Toast.LENGTH_SHORT).show()
                     return@let // 退出，坚决不重复添加
                 }
 
-                // 2. 检查：这首歌是不是在播放队列的更后面？
+                // 2. 检查：这首歌是不是已经在队列的其他位置（不管前面还是后面）？
                 var existingIndex = -1
-                for (i in nextIdx until controller.mediaItemCount) {
+                for (i in 0 until controller.mediaItemCount) {
+                    if (i == currentIdx) continue
                     if (controller.getMediaItemAt(i).mediaId == song.data) {
                         existingIndex = i
                         break
@@ -315,9 +338,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }
 
                 if (existingIndex != -1) {
-                    // 场景 A：已经在后面的队列里了，我们就把它“提拔”上来，不产生重复！
-                    controller.moveMediaItem(existingIndex, nextIdx)
-                    Toast.makeText(context, "已移至下一首播放", Toast.LENGTH_SHORT).show()
+                    // 场景 A：已经在队列里了（不论原本排在前面还是后面），把它挪到下一首位置，绝不重复插入！
+                    // moveMediaItem 之后，若原位置在目标位置之前，目标下标要减 1 做修正
+                    val targetIdx = if (existingIndex < nextIdx) nextIdx - 1 else nextIdx
+                    controller.moveMediaItem(existingIndex, targetIdx)
+                    Toast.makeText(context, context.getString(R.string.moved_to_play_next), Toast.LENGTH_SHORT).show()
                 } else {
                     // 场景 B：完全是一首新歌，正常插入
                     val artworkUri = android.net.Uri.parse("auralis://cover?path=" + java.net.URLEncoder.encode(song.data, "UTF-8"))
@@ -328,7 +353,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         .build()
                     val mediaItem = MediaItem.Builder().setMediaId(song.data).setUri(song.data).setMediaMetadata(metadata).build()
                     controller.addMediaItem(nextIdx, mediaItem)
-                    Toast.makeText(context, "已添加到下一首", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.added_to_play_next), Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // 如果当前什么都没在播放，就直接播放这首歌
@@ -351,12 +376,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
             if (context.contentResolver.delete(uri, null, null) > 0) {
                 scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
-                Toast.makeText(context, "彻底删除成功", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.delete_permanent_success), Toast.LENGTH_SHORT).show()
             } else {
                 if (File(song.data).delete()) {
                     scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
-                    Toast.makeText(context, "彻底删除成功", Toast.LENGTH_SHORT).show()
-                } else { Toast.makeText(context, "删除失败，文件可能被占用", Toast.LENGTH_SHORT).show() }
+                    Toast.makeText(context, context.getString(R.string.delete_permanent_success), Toast.LENGTH_SHORT).show()
+                } else { Toast.makeText(context, context.getString(R.string.delete_failed_file_locked), Toast.LENGTH_SHORT).show() }
             }
         } catch (e: SecurityException) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -369,13 +394,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 if (recoverable != null) {
                     pendingDeleteSong = song
                     deleteLauncher.launch(IntentSenderRequest.Builder(recoverable.userAction.actionIntent.intentSender).build())
-                } else Toast.makeText(context, "删除受限", Toast.LENGTH_SHORT).show()
-            } else Toast.makeText(context, "删除受限", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) { Toast.makeText(context, "删除出错", Toast.LENGTH_SHORT).show() }
+                } else Toast.makeText(context, context.getString(R.string.delete_restricted), Toast.LENGTH_SHORT).show()
+            } else Toast.makeText(context, context.getString(R.string.delete_restricted), Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) { Toast.makeText(context, context.getString(R.string.delete_error), Toast.LENGTH_SHORT).show() }
     }
 
     val fetchSongsList = {
-        syncLog = "正在连接电脑获取清单..."
+        syncLog = context.getString(R.string.connecting_to_pc)
         showDownloadingDialog = true
         scope.launch {
             try {
@@ -383,11 +408,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 missingSongsList = SyncManager.fetchMissingSongs(context, pcServerIp, allSongs, folderUri)
                 showDownloadingDialog = false
                 if (missingSongsList.isEmpty()) {
-                    syncLog = "手机已经是最新，没有缺少的歌曲！"
+                    syncLog = context.getString(R.string.already_up_to_date)
                     showDownloadingDialog = true; delay(2000); showDownloadingDialog = false
                 } else showSelectionDialog = true
             } catch (e: Exception) {
-                syncLog = "连接失败，请检查电脑 IP 是否正确、且在同一 Wi-Fi"
+                syncLog = context.getString(R.string.connect_failed_check_ip)
                 delay(3000); showDownloadingDialog = false
             }
         }
@@ -434,7 +459,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     } catch (e: Exception) { failCount++ }
                 }
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "批量导入完成：成功 $successCount 首，未匹配 $failCount 首", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.bulk_import_done, successCount, failCount), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -452,7 +477,76 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             val dur = controller?.duration?.coerceAtLeast(1L) ?: 1L
             val pos = controller?.currentPosition ?: 0L
             miniProgress = (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+            miniPositionMs = pos
             delay(400)
+        }
+    }
+
+    // ── 一起听：房主广播 ─────────────────────────────────────
+    // 只要「附近的 Auralis」里开了“允许附近设备一起听”，就把当前播放状态
+    // 定期写进 RoomManager；AuralisServer 那边的 /auralis/room/state 接口会原样吐给来问的访客。
+    LaunchedEffect(mediaController, currentAudioPath, isPlaying) {
+        while (isActive) {
+            val controller = mediaController
+            if (RoomManager.isHosting.value && controller != null && currentAudioPath.isNotEmpty()) {
+                val song = allSongs.find { it.data == currentAudioPath }
+                if (song != null) {
+                    RoomManager.updateHostState(
+                        RoomManager.RoomState(
+                            hostDeviceId = AuralisDeviceId.getId(context),
+                            hostDeviceName = AuralisDeviceId.getName(context),
+                            filename = File(song.data).name,
+                            title = song.title,
+                            artist = song.artist,
+                            positionMs = controller.currentPosition,
+                            durationMs = controller.duration.coerceAtLeast(0L),
+                            isPlaying = controller.isPlaying
+                        )
+                    )
+                }
+            }
+            delay(1500)
+        }
+    }
+
+    // ── 一起听：访客端跟播 ─────────────────────────────────────
+    // 加入了某个房主之后，每 1.5 秒去问一次对方现在放到哪了，
+    // 换歌就在本地库里按文件名找同名歌曲切过去，进度偏差超过 1.2 秒就纠偏，
+    // 播放/暂停状态也跟房主保持一致。找不到本地同名歌曲就只更新状态、提示用户，不强行播放。
+    LaunchedEffect(mediaController) {
+        var lastSyncedFilename = ""
+        while (isActive) {
+            val joined = RoomManager.joinedHost.value
+            val controller = mediaController
+            if (joined != null && controller != null) {
+                val state = withContext(Dispatchers.IO) { fetchRoomState(joined) }
+                RoomManager.setRemoteState(state)
+                if (state != null) {
+                    if (state.filename != lastSyncedFilename) {
+                        val localSong = allSongs.find { File(it.data).name == state.filename }
+                        if (localSong != null) {
+                            val index = allSongs.indexOf(localSong)
+                            onSongClickAction(localSong, index, allSongs)
+                            lastSyncedFilename = state.filename
+                        } else {
+                            Toast.makeText(context, context.getString(R.string.room_song_missing, state.title), Toast.LENGTH_SHORT).show()
+                            lastSyncedFilename = state.filename // 避免这条 Toast 一直重复弹
+                        }
+                    } else {
+                        // 同一首歌：校正播放/暂停状态 + 进度漂移
+                        val estimatedRemotePos = if (state.isPlaying) {
+                            state.positionMs + (System.currentTimeMillis() - state.updatedAtMs)
+                        } else state.positionMs
+                        val drift = kotlin.math.abs(controller.currentPosition - estimatedRemotePos)
+                        if (drift > 1200L) controller.seekTo(estimatedRemotePos.coerceAtLeast(0L))
+                        if (state.isPlaying && !controller.isPlaying) controller.play()
+                        if (!state.isPlaying && controller.isPlaying) controller.pause()
+                    }
+                }
+            } else if (joined == null) {
+                lastSyncedFilename = ""
+            }
+            delay(1500)
         }
     }
 
@@ -571,6 +665,21 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         isCurrentSongCounted = false
     }
 
+    // 悬浮歌词 overlay 用：不用打开全屏播放器也要有歌词可显示。
+    // 这里只做“本地 .lrc / 内嵌歌词”的轻量解析，在线抓词那套复杂交互还是留在全屏播放器里。
+    // 如果全屏播放器后面把在线抓到的词同步过来了（同一个 PlayerStateHolder），会自动覆盖掉这份本地结果。
+    LaunchedEffect(currentAudioPath) {
+        if (currentAudioPath.isEmpty()) {
+            PlayerStateHolder.clearLyrics()
+            return@LaunchedEffect
+        }
+        val path = currentAudioPath
+        val localLines = withContext(Dispatchers.IO) { LrcParser.parse(path) }
+        if (path == currentAudioPath) { // 切歌太快时防止旧结果覆盖新歌
+            PlayerStateHolder.updateLyrics(path, localLines)
+        }
+    }
+
     LaunchedEffect(currentAudioPath, isPlaying) {
         if (isPlaying && currentAudioPath.isNotEmpty() && !isCurrentSongCounted) {
             while(isActive) {
@@ -596,7 +705,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         ctx?.let {
                             // 因为上面已经定义了 dao 和 allowedFolders，这里就不会再报错了！
                             MusicUtils.syncLocalMusicToDatabase(it, dao, allowedFolders)
-                            android.widget.Toast.makeText(it, "新歌已自动入库！", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(it, it.getString(R.string.new_song_auto_imported), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -631,24 +740,89 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(200))
             ) {
                 if (currentTitle != null) {
-                    PremiumMiniPlayerBar(
-                        title = currentTitle!!,
-                        artist = currentArtist ?: "未知歌手",
-                        isPlaying = isPlaying,
-                        coverBitmap = miniCover,
-                        audioPath = currentAudioPath,
-                        progress = miniProgress,
-                        onPreviousClick = {
-                            mediaController?.let { controller ->
-                                val currentIdx = controller.currentMediaItemIndex
-                                if (currentIdx > 0) { controller.seekTo(currentIdx - 1, 0L); controller.play() }
-                                else controller.seekTo(0, 0L)
+                    Column {
+                        // ── 悬浮歌词 overlay：不用打开全屏播放器也能跟着走词 ──
+                        val overlayLrcLines by PlayerStateHolder.lrcLines.collectAsState()
+                        val overlayLrcPath by PlayerStateHolder.lrcLoadedForPath.collectAsState()
+                        var lyricsOverlayDismissedFor by remember { mutableStateOf("") }
+                        // 首次进来把 SharedPreferences 里存的值同步进全局 StateFlow（只做一次）
+                        LaunchedEffect(Unit) {
+                            PlayerStateHolder.setLyricsOverlayEnabled(prefs.getBoolean("lyrics_overlay_enabled", true))
+                        }
+                        val lyricsOverlayEnabled by PlayerStateHolder.lyricsOverlayEnabled.collectAsState()
+                        val showOverlay = lyricsOverlayEnabled &&
+                            overlayLrcPath == currentAudioPath &&
+                            overlayLrcLines.isNotEmpty() &&
+                            lyricsOverlayDismissedFor != currentAudioPath
+
+                        AnimatedVisibility(
+                            visible = showOverlay,
+                            enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it / 2 }),
+                            exit = fadeOut(tween(150))
+                        ) {
+                            val currentLine = remember(overlayLrcLines, miniPositionMs) {
+                                if (overlayLrcLines.isEmpty()) null
+                                else overlayLrcLines.lastOrNull { it.timeMs <= miniPositionMs } ?: overlayLrcLines.firstOrNull()
                             }
-                        },
-                        onPlayPauseClick = { if (isPlaying) mediaController?.pause() else mediaController?.play() },
-                        onNextClick = { mediaController?.seekToNext() },
-                        onBarClick = { showFullScreenPlayer = true }
-                    )
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .clickable { showFullScreenPlayer = true },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                tonalElevation = 3.dp,
+                                shadowElevation = 2.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = currentLine?.text?.takeIf { it.isNotBlank() } ?: "♪",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            // 只是这一首暂时不想看悬浮歌词，不是永久关闭
+                                            lyricsOverlayDismissedFor = currentAudioPath
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            stringResource(R.string.hide_lyrics_overlay),
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        PremiumMiniPlayerBar(
+                            title = currentTitle!!,
+                            artist = currentArtist ?: stringResource(R.string.unknown_artist),
+                            isPlaying = isPlaying,
+                            coverBitmap = miniCover,
+                            audioPath = currentAudioPath,
+                            progress = miniProgress,
+                            onPreviousClick = {
+                                // 用 seekToPrevious()（而不是手动 currentMediaItemIndex - 1）
+                                // 是因为后者只会按“原始列表顺序”回退一格，
+                                // 开启随机播放(shuffle)时这跟“真正的上一首”完全对不上，
+                                // 表现就跟乱跳到别的歌一样。seekToPrevious() 会自动尊重 shuffle 顺序。
+                                mediaController?.seekToPrevious()
+                            },
+                            onPlayPauseClick = { if (isPlaying) mediaController?.pause() else mediaController?.play() },
+                            onNextClick = { mediaController?.seekToNext() },
+                            onBarClick = { showFullScreenPlayer = true }
+                        )
+                    }
                 }
             }
         }
@@ -702,14 +876,14 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     ) {
                         EmptyStateView(
                             icon = Icons.Filled.LibraryMusic,
-                            title = "需要访问音乐文件",
-                            subtitle = "请允许读取音频、通知与麦克风权限，以便扫描曲库、显示播放控制与律动效果"
+                            title = stringResource(R.string.need_music_access_title),
+                            subtitle = stringResource(R.string.need_music_access_subtitle)
                         )
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = { activity.requestRuntimePermissions() }) {
                             Icon(Icons.Filled.Security, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("授予权限")
+                            Text(stringResource(R.string.action_grant_permission))
                         }
                     }
                 }
@@ -754,7 +928,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                 MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
                                             }
                                             isRefreshing = false
-                                            android.widget.Toast.makeText(context, "列表已刷新", android.widget.Toast.LENGTH_SHORT).show()
+                                            android.widget.Toast.makeText(context, context.getString(R.string.list_refreshed), android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },
@@ -782,8 +956,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                     ) {
                                         EmptyStateView(
                                             icon = if (pageIndex == 1) Icons.Filled.FavoriteBorder else Icons.Filled.MusicNote,
-                                            title = if (pageIndex == 1) "还没有收藏" else "曲库为空",
-                                            subtitle = if (pageIndex == 1) "点击歌曲菜单，将喜欢的音乐加入红心收藏" else "下拉可刷新本地曲库，或在设置中添加扫描文件夹"
+                                            title = if (pageIndex == 1) stringResource(R.string.empty_favorites_title) else stringResource(R.string.empty_library_title),
+                                            subtitle = if (pageIndex == 1) stringResource(R.string.empty_favorites_subtitle) else stringResource(R.string.empty_library_subtitle)
                                         )
                                     }
                                 } else {
@@ -813,7 +987,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                     scope.launch {
                                                         val liveDevices = NsdHelper.discovered.value
                                                         if (liveDevices.isEmpty()) {
-                                                            Toast.makeText(context, "附近没有在线的 Auralis 设备", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, context.getString(R.string.no_nearby_devices), Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             songToShareToNearby = song
                                                         }
@@ -827,17 +1001,39 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
 
                         2 -> {
-                            val activeTopList = topSongs.filter { it.playCount > 0 }
+                            // 之前这里只有 topSongs（按 playCount 次数排的），
+                            // 不管选哪个 tab，最新听过但只听了一两次的歌永远看不到。
+                            // 现在加个切换：按次数 / 按最近播放时间。
+                            val activeTopList = if (historySortByRecent) {
+                                recentSongs.filter { it.playCount > 0 }
+                            } else {
+                                topSongs.filter { it.playCount > 0 }
+                            }
                             if (activeTopList.isEmpty()) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     EmptyStateView(
                                         icon = Icons.Filled.History,
-                                        title = "暂无播放记录",
-                                        subtitle = "多听几首歌，这里会展示你的常听榜单"
+                                        title = stringResource(R.string.no_play_history_title),
+                                        subtitle = stringResource(R.string.no_play_history_subtitle)
                                     )
                                 }
                             } else {
                                 Column(modifier = Modifier.fillMaxSize()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = !historySortByRecent,
+                                            onClick = { historySortByRecent = false },
+                                            label = { Text(stringResource(R.string.sort_by_count)) }
+                                        )
+                                        FilterChip(
+                                            selected = historySortByRecent,
+                                            onClick = { historySortByRecent = true },
+                                            label = { Text(stringResource(R.string.sort_by_recent)) }
+                                        )
+                                    }
                                     LazyColumn(
                                         modifier = Modifier.weight(1f),
                                         contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
@@ -875,7 +1071,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 items(albumGroups) { (albumName, songs) ->
                                     AlbumRow(
                                         albumName = albumName,
-                                        artistName = songs.firstOrNull()?.artist ?: "未知歌手",
+                                        artistName = songs.firstOrNull()?.artist ?: stringResource(R.string.unknown_artist),
                                         songCount = songs.size,
                                         onClick = {
                                             searchQuery = albumName
@@ -921,15 +1117,15 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                     ) {
                                         Icon(Icons.Default.Add, null)
                                         Spacer(Modifier.width(8.dp))
-                                        Text("新建自定义歌单", fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(R.string.action_new_custom_playlist), fontWeight = FontWeight.SemiBold)
                                     }
                                     Spacer(Modifier.height(12.dp))
                                     if (allPlaylists.isEmpty()) {
                                         Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                             EmptyStateView(
                                                 icon = Icons.Filled.QueueMusic,
-                                                title = "还没有歌单",
-                                                subtitle = "点击上方按钮，创建你的第一个自定义歌单"
+                                                title = stringResource(R.string.empty_playlists_title),
+                                                subtitle = stringResource(R.string.empty_playlists_subtitle)
                                             )
                                         }
                                     } else {
@@ -943,7 +1139,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
                                                 PlaylistRow(
                                                     name = playlist.name,
-                                                    subtitle = "创建于 ${sdf.format(java.util.Date(playlist.createdAt))}",
+                                                    subtitle = stringResource(R.string.created_at_label, sdf.format(java.util.Date(playlist.createdAt))),
                                                     onClick = { selectedPlaylist = playlist },
                                                     onDelete = {
                                                         scope.launch(Dispatchers.IO) { dao.deletePlaylist(playlist.id) }
@@ -966,25 +1162,25 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                             scope.launch {
                                                 val file = MusicUtils.exportPlaylistToM3U(context, selectedPlaylist!!.name, playlistSongs)
                                                 if (file != null) {
-                                                    Toast.makeText(context, "已导出至 Download/Auralis/Playlists: ${file.name}", Toast.LENGTH_LONG).show()
+                                                    Toast.makeText(context, context.getString(R.string.playlist_exported_to, file.name), Toast.LENGTH_LONG).show()
                                                 } else {
-                                                    Toast.makeText(context, "导出失败", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, context.getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         })
  {
-                                            Icon(Icons.Default.FileDownload, "导出歌单")
+                                            Icon(Icons.Default.FileDownload, stringResource(R.string.action_export_playlist))
                                         }
 
-                                        Text("共 ${playlistSongs.size} 首", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                                        Text(stringResource(R.string.song_count_label, playlistSongs.size), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                                     }
                                     HorizontalDivider()
                                     if (playlistSongs.isEmpty()) {
                                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                             EmptyStateView(
                                                 icon = Icons.Filled.PlaylistAdd,
-                                                title = "歌单是空的",
-                                                subtitle = "在歌曲列表中长按或点击菜单，添加到当前歌单"
+                                                title = stringResource(R.string.empty_playlist_songs_title),
+                                                subtitle = stringResource(R.string.empty_playlist_songs_subtitle)
                                             )
                                         }
                                     } else {
@@ -1000,7 +1196,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                     onRemoveFromPlaylist = {
                                                         scope.launch(Dispatchers.IO) {
                                                             dao.removeSongFromPlaylist(selectedPlaylist!!.id, song.data)
-                                                            withContext(Dispatchers.Main) { Toast.makeText(context, "已从歌单移除", Toast.LENGTH_SHORT).show() }
+                                                            withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.removed_from_playlist), Toast.LENGTH_SHORT).show() }
                                                         }
                                                     },
                                                     onDelete = { onSongDeleteAction(song) }
@@ -1041,7 +1237,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         if (isVisible) {
             Box(modifier = Modifier.fillMaxSize()) {
                 FullScreenPlayer(
-                    title = currentTitle!!, artist = currentArtist ?: "未知歌手",
+                    title = currentTitle!!, artist = currentArtist ?: stringResource(R.string.unknown_artist),
                     isPlaying = isPlaying, artwork = currentArtwork, audioPath = currentAudioPath,
                     mediaController = mediaController, repeatMode = repeatMode, shuffleMode = shuffleMode,
                     sleepTimerSeconds = sleepTimerSeconds, audioManager = audioManager,
@@ -1062,16 +1258,16 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         var customMinutes by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showSleepTimerDialog = false },
-            title = { Text("睡眠定时器", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.sleep_timer_title), fontWeight = FontWeight.Bold) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     if (sleepTimerSeconds > 0) {
-                        Text("当前：${sleepTimerSeconds / 60}分${sleepTimerSeconds % 60}秒后暂停", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.sleep_timer_current_status, sleepTimerSeconds / 60, sleepTimerSeconds % 60), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(4.dp))
-                        OutlinedButton(onClick = { sleepTimerSeconds = 0L; showSleepTimerDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("取消定时器") }
+                        OutlinedButton(onClick = { sleepTimerSeconds = 0L; showSleepTimerDialog = false }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel_timer)) }
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     }
-                    listOf(15 to "15 分钟", 30 to "30 分钟", 45 to "45 分钟", 60 to "1 小时", 90 to "90 分钟").forEach { (minutes, label) ->
+                    listOf(15 to stringResource(R.string.sleep_15min), 30 to stringResource(R.string.sleep_30min), 45 to stringResource(R.string.sleep_45min), 60 to stringResource(R.string.sleep_1hr), 90 to stringResource(R.string.sleep_90min)).forEach { (minutes, label) ->
                         TextButton(onClick = { sleepTimerSeconds = minutes * 60L; showSleepTimerDialog = false }, modifier = Modifier.fillMaxWidth()) {
                             Text(label, style = MaterialTheme.typography.bodyLarge)
                         }
@@ -1084,7 +1280,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         onValueChange = {
                             if (it.isEmpty() || it.all { char -> char.isDigit() }) customMinutes = it
                         },
-                        label = { Text("自定义时间 (分钟)") },
+                        label = { Text(stringResource(R.string.custom_minutes_label)) },
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
                         ),
@@ -1099,17 +1295,17 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 sleepTimerSeconds = mins * 60L
                                 showSleepTimerDialog = false
                             } else {
-                                Toast.makeText(context, "请输入有效的分钟数", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.invalid_minutes_input), Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = customMinutes.isNotEmpty()
                     ) {
-                        Text("确认自定义")
+                        Text(stringResource(R.string.action_confirm_custom))
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showSleepTimerDialog = false }) { Text("关闭") } }
+            confirmButton = { TextButton(onClick = { showSleepTimerDialog = false }) { Text(stringResource(R.string.action_close)) } }
         )
     }
 
@@ -1170,11 +1366,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 },
                 onRescanLibrary = {
                     scope.launch(Dispatchers.IO) {
-                        withContext(Dispatchers.Main) { Toast.makeText(context, "开始深度解析...", Toast.LENGTH_SHORT).show() }
+                        withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.deep_scan_started), Toast.LENGTH_SHORT).show() }
                         CoverArtCache.invalidateAll(context)
                         db.openHelper.writableDatabase.execSQL("DELETE FROM songs")
                         MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
-                        withContext(Dispatchers.Main) { Toast.makeText(context, "深度解析完成！", Toast.LENGTH_LONG).show() }
+                        withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.deep_scan_done), Toast.LENGTH_LONG).show() }
                     }
                 },
                 onBatchImportLrc = { batchLrcPicker.launch(arrayOf("*/*")) },
@@ -1193,7 +1389,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 showDuplicateDialog = true
                                 showSettingsScreen = false // 关掉设置页，优雅地弹出查重界面
                             } else {
-                                Toast.makeText(context, "太棒了！你的曲库非常干净，没有重复歌曲 ✨", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.library_clean_no_duplicates), Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -1218,7 +1414,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 AlertDialog(
                     onDismissRequest = {},  // 下载中不能关闭
                     shape = RoundedCornerShape(24.dp),
-                    title = { Text("接收中…", fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.receiving_ellipsis), fontWeight = FontWeight.Bold) },
                     text = {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -1264,7 +1460,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                 AuralisPushManager.consume()
                                 Toast.makeText(
                                     context,
-                                    if (ok) "✅ 已接收：${push.songTitle}" else "❌ 下载失败",
+                                    if (ok) context.getString(R.string.received_song, push.songTitle) else context.getString(R.string.download_failed),
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 if (ok) scope.launch {
@@ -1284,7 +1480,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         AlertDialog(
             onDismissRequest = { showDuplicateDialog = false },
             containerColor = MaterialTheme.colorScheme.surface, // 去掉花哨底色
-            title = { Text("清理重复歌曲", fontWeight = FontWeight.W600, fontSize = 20.sp) },
+            title = { Text(stringResource(R.string.action_clean_duplicates), fontWeight = FontWeight.W600, fontSize = 20.sp) },
             text = {
                 // 记录当前点击展开了哪首歌的详细信息
                 var expandedSongId by remember { mutableStateOf<Long?>(null) }
@@ -1294,7 +1490,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         item {
                             // 高级感标题：去掉了色块，采用极简的文字+留白
                             Text(
-                                text = "组 ${index + 1} · ${group[0].title}",
+                                text = stringResource(R.string.duplicate_group_label, index + 1, group[0].title),
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
@@ -1344,9 +1540,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                     scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
                                                     // 3. 刷新 UI
                                                     duplicatesList = duplicatesList.map { g -> g.filter { it.id != song.id } }.filter { it.size > 1 }
-                                                    Toast.makeText(context, "已从手机彻底删除", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, context.getString(R.string.delete_permanent_success), Toast.LENGTH_SHORT).show()
                                                 } else {
-                                                    Toast.makeText(context, "删除失败，文件可能被占用", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, context.getString(R.string.delete_failed_file_locked), Toast.LENGTH_SHORT).show()
                                                 }
                                             } catch (e: SecurityException) {
                                                 // 触发 Android 10+ 系统级删除授权弹窗
@@ -1363,7 +1559,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                     }
                                                 }
                                             } catch (e: Exception) {
-                                                Toast.makeText(context, "删除出错", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, context.getString(R.string.delete_error), Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     ) {
@@ -1380,14 +1576,14 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
                                             .padding(12.dp)
                                     ) {
-                                        Text("物理路径: ${song.data.substringAfterLast("/")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(stringResource(R.string.physical_path_label, song.data.substringAfterLast("/")), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Spacer(Modifier.height(6.dp))
 
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                             // 👇 检查位深度：如果还是显示“未知”，说明数据库里这列是 0
-                                            val bitsText = if (song.bitDepth > 0) "${song.bitDepth}-bit" else "等待解析..."
+                                            val bitsText = if (song.bitDepth > 0) "${song.bitDepth}-bit" else stringResource(R.string.parsing_ellipsis)
                                             Text(
-                                                text = "位深度: $bitsText",
+                                                text = stringResource(R.string.bit_depth_label, bitsText),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = if (song.bitDepth >= 24) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1396,10 +1592,10 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                             val rateText = if (song.samplingRate > 0) {
                                                 String.format("%.1f kHz", song.samplingRate / 1000f)
                                             } else {
-                                                "等待解析..."
+                                                stringResource(R.string.parsing_ellipsis)
                                             }
                                             Text(
-                                                text = "采样率: $rateText",
+                                                text = stringResource(R.string.sample_rate_label, rateText),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = if (song.samplingRate > 48000) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1408,7 +1604,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                         // 🔮 加一个小彩蛋：显示这首歌的音量增益，这是 jaudiotagger 是否活着的终极证据
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            text = "音量增益 (ReplayGain): ${String.format("%.2f dB", song.replayGain)}",
+                                            text = stringResource(R.string.replay_gain_label, String.format("%.2f dB", song.replayGain)),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = if (song.replayGain != 0f) MaterialTheme.colorScheme.secondary else Color.Gray
                                         )
@@ -1421,7 +1617,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showDuplicateDialog = false }) { Text("关闭") } }
+            confirmButton = { TextButton(onClick = { showDuplicateDialog = false }) { Text(stringResource(R.string.action_close)) } }
         )
     }
     // ── Nearby Screen ─────────────────────────────────────────
@@ -1443,7 +1639,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     androidx.compose.animation.AnimatedVisibility(
         visible = showAboutScreen,
         enter = slideInHorizontally { it },
-        exit  = slideOutHorizontally { it }
+        exit  = slideOutHorizontally { it },
+        modifier = Modifier.fillMaxSize()
     ) {
         AboutScreen(onBack = { showAboutScreen = false })
         BackHandler { showAboutScreen = false }
@@ -1458,19 +1655,19 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
 
     if (showSelectionDialog) {
         AlertDialog(
-            onDismissRequest = { showSelectionDialog = false }, title = { Text("发现新歌曲") },
+            onDismissRequest = { showSelectionDialog = false }, title = { Text(stringResource(R.string.found_new_songs_title)) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth().height(300.dp)) {
                     item {
                         val allSelected = missingSongsList.all { it.isSelected }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { missingSongsList = missingSongsList.map { it.copy(isSelected = !allSelected) } }.padding(vertical = 8.dp)) {
-                            Checkbox(checked = allSelected, onCheckedChange = null); Text("全选", fontWeight = FontWeight.Bold)
+                            Checkbox(checked = allSelected, onCheckedChange = null); Text(stringResource(R.string.action_select_all), fontWeight = FontWeight.Bold)
                         }; HorizontalDivider()
                     }
                     itemsIndexed(missingSongsList) { index, item ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { val newList = missingSongsList.toMutableList(); newList[index] = item.copy(isSelected = !item.isSelected); missingSongsList = newList }.padding(vertical = 4.dp)) {
                             Checkbox(checked = item.isSelected, onCheckedChange = null)
-                            Column { Text(item.remoteSong.filename, maxLines = 1, style = MaterialTheme.typography.bodyMedium); Row { Text("${item.remoteSong.size / 1048576} MB", style = MaterialTheme.typography.bodySmall, color = Color.Gray); if (item.remoteSong.has_lrc) Text(" • 带歌词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) } }
+                            Column { Text(item.remoteSong.filename, maxLines = 1, style = MaterialTheme.typography.bodyMedium); Row { Text("${item.remoteSong.size / 1048576} MB", style = MaterialTheme.typography.bodySmall, color = Color.Gray); if (item.remoteSong.has_lrc) Text(stringResource(R.string.has_lyrics_suffix), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) } }
                         }
                     }
                 }
@@ -1483,17 +1680,17 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         SyncTaskQueue.serverIp = pcServerIp; SyncTaskQueue.saveFolderUri = android.net.Uri.parse(savedFolderUriStr); SyncTaskQueue.songsToDownload = toDownload
                         val intent = Intent(context, SyncService::class.java)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-                        Toast.makeText(context, "已切换至后台同步，请下拉通知栏查看进度", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, context.getString(R.string.switched_to_background_sync), Toast.LENGTH_LONG).show()
                     }
-                }) { Text("后台同步") }
+                }) { Text(stringResource(R.string.action_background_sync)) }
             },
-            dismissButton = { TextButton(onClick = { showSelectionDialog = false }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { showSelectionDialog = false }) { Text(stringResource(R.string.action_cancel)) } }
         )
     }
 
     if (showDownloadingDialog) {
         AlertDialog(
-            onDismissRequest = {}, title = { Text("同步中", fontWeight = FontWeight.Bold) },
+            onDismissRequest = {}, title = { Text(stringResource(R.string.syncing_title), fontWeight = FontWeight.Bold) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(syncLog); Spacer(Modifier.height(16.dp))
@@ -1510,7 +1707,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     if (songToAddToPlaylist != null) {
         AlertDialog(
             onDismissRequest = { songToAddToPlaylist = null },
-            title = { Text("添加到歌单", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.add_to_playlist_title), fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
                     item {
@@ -1520,11 +1717,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         ) {
                             Icon(Icons.Filled.Add, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("新建歌单")
+                            Text(stringResource(R.string.action_new_playlist))
                         }
                     }
                     if (allPlaylists.isEmpty()) {
-                        item { Text("暂无自定义歌单", color = Color.Gray, modifier = Modifier.padding(16.dp)) }
+                        item { Text(stringResource(R.string.no_custom_playlists), color = Color.Gray, modifier = Modifier.padding(16.dp)) }
                     } else {
                         items(allPlaylists) { playlist ->
                             ListItem(
@@ -1536,11 +1733,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                             // 把歌和歌单绑定存入数据库
                                             dao.addSongToPlaylist(PlaylistSong(playlistId = playlist.id, songPath = songToAddToPlaylist!!.data))
                                             withContext(Dispatchers.Main) {
-                                                Toast.makeText(context, "已添加到 ${playlist.name}", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, context.getString(R.string.added_to_playlist_named, playlist.name), Toast.LENGTH_SHORT).show()
                                                 songToAddToPlaylist = null // 关闭弹窗
                                             }
                                         } catch (e: Exception) {
-                                            withContext(Dispatchers.Main) { Toast.makeText(context, "添加失败或已在歌单中", Toast.LENGTH_SHORT).show() }
+                                            withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.add_to_playlist_failed), Toast.LENGTH_SHORT).show() }
                                         }
                                     }
                                 }
@@ -1550,7 +1747,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { songToAddToPlaylist = null }) { Text("取消") } }
+            confirmButton = { TextButton(onClick = { songToAddToPlaylist = null }) { Text(stringResource(R.string.action_cancel)) } }
         )
     }
 
@@ -1558,12 +1755,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     if (showNewPlaylistDialog) {
         AlertDialog(
             onDismissRequest = { showNewPlaylistDialog = false; newPlaylistName = "" },
-            title = { Text("新建歌单") },
+            title = { Text(stringResource(R.string.action_new_playlist)) },
             text = {
                 OutlinedTextField(
                     value = newPlaylistName,
                     onValueChange = { newPlaylistName = it },
-                    label = { Text("歌单名称") },
+                    label = { Text(stringResource(R.string.playlist_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1578,23 +1775,49 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             if (songToAddToPlaylist != null) {
                                 dao.addSongToPlaylist(PlaylistSong(playlistId = newId, songPath = songToAddToPlaylist!!.data))
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "已创建并添加歌曲", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.playlist_created_added_song), Toast.LENGTH_SHORT).show()
                                     showNewPlaylistDialog = false
                                     newPlaylistName = ""
                                     songToAddToPlaylist = null // 连带外层选择窗一起关闭
                                 }
                             } else {
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "歌单创建成功", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.playlist_created_success), Toast.LENGTH_SHORT).show()
                                     showNewPlaylistDialog = false
                                     newPlaylistName = ""
                                 }
                             }
                         }
                     }
-                }) { Text("确定") }
+                }) { Text(stringResource(R.string.action_confirm)) }
             },
-            dismissButton = { TextButton(onClick = { showNewPlaylistDialog = false; newPlaylistName = "" }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { showNewPlaylistDialog = false; newPlaylistName = "" }) { Text(stringResource(R.string.action_cancel)) } }
         )
+    }
+}
+
+// ── 一起听：向房主拉取当前播放状态 ─────────────────────────────
+private val roomStateHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+}
+private val roomStateGson = Gson()
+
+/** 房主没开“一起听”或者请求失败，都直接返回 null——调用方按“暂时同步不上”处理，不崩、不弹一堆错误。 */
+private fun fetchRoomState(device: DiscoveredDevice): RoomManager.RoomState? {
+    return try {
+        val request = Request.Builder()
+            .url("http://${device.host}:${device.port}/auralis/room/state")
+            .get()
+            .build()
+        roomStateHttpClient.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val body = resp.body?.string() ?: return null
+            roomStateGson.fromJson(body, RoomManager.RoomState::class.java)
+        }
+    } catch (e: Exception) {
+        null
     }
 }

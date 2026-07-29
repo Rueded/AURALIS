@@ -277,7 +277,8 @@ object AudioCache {
                         } else {
                             // 🚨 2. 本地没有图片？呼叫神级爬虫去网上扒高清原图！
                             // 为了不卡住列表滑动，这里通过协程挂起，在 IO 线程去下载
-                            resultBitmap = CoverFetcher.fetchHighResCover(song.title, song.artist)
+                            // extractAndSave 方法本身就有 context 参数，直接传进去即可
+                            resultBitmap = CoverFetcher.fetchHighResCover(context, song.title, song.artist)
 
                             // 3. 如果连网络都没找到，再走原来的 MediaStore 兜底逻辑
                             if (resultBitmap == null) {
@@ -392,7 +393,7 @@ data class AudioSpec(
 
 enum class AudioLevel(val label: String, val color: Color) {
     LQ("LQ", Color(0xFF795548)),
-    STANDARD("标准", Color(0xFF888888)),
+    STANDARD("Standard", Color(0xFF888888)),
     HQ("HQ", Color(0xFF388E3C)),
     CD("CD", Color(0xFF00ACC1)),
     LOSSLESS("Lossless", Color(0xFF8E24AA)),

@@ -108,7 +108,8 @@ object CoverArtCache {
         }
 
         if (bitmap == null || forceNetwork) {
-            bitmap = CoverFetcher.fetchHighResCover(title, artist)
+            // 🚨 修改这里：传入 context
+            bitmap = CoverFetcher.fetchHighResCover(context, title, artist)
             if (bitmap == null && !forceNetwork) {
                 bitmap = loadAlbumArtFromMediaStore(context, path)
             }

@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.media.MediaCodec
@@ -20,10 +21,11 @@ object SpectrogramGenerator {
         val cutoffHz: Float,
         val verdict: String,
         val verdictDetails: String,
-        val isLossless: Boolean
+        val isLossless: Boolean,
+        val sampleRate: Int
     )
 
-    suspend fun generate(audioPath: String): Result? = withContext(Dispatchers.IO) {
+    suspend fun generate(audioPath: String, context: Context): Result? = withContext(Dispatchers.IO) {
         val file = File(audioPath)
         if (!file.exists()) {
             Log.e(TAG, "Audio file does not exist: $audioPath")
@@ -226,18 +228,18 @@ object SpectrogramGenerator {
 
         when {
             cutoffHz >= 20000.0f -> {
-                verdict = "🌟 纯正高清母带 / 真无损 (True Lossless)"
-                verdictDetails = "高频上限达到 ${String.format("%.1f", cutoffHz / 1000.0f)} kHz，声学特征完全符合高保真/真无损规格。"
+                verdict = context.getString(R.string.verdict_true_lossless)
+                verdictDetails = context.getString(R.string.verdict_true_lossless_detail, String.format("%.1f", cutoffHz / 1000.0f))
                 isLossless = true
             }
             cutoffHz >= 18000.0f -> {
-                verdict = "⚠️ 疑似 MP3-320kbps 转制 (Upscaled Lossy)"
-                verdictDetails = "高频上限在 ${String.format("%.1f", cutoffHz / 1000.0f)} kHz 处出现衰减，表现出典型的 320kbps 高频截断特征。"
+                verdict = context.getString(R.string.verdict_upscaled_lossy)
+                verdictDetails = context.getString(R.string.verdict_upscaled_lossy_detail, String.format("%.1f", cutoffHz / 1000.0f))
                 isLossless = false
             }
             else -> {
-                verdict = "❌ 极高嫌疑高频欺诈 / MP3-128kbps 转制 (Fake Lossless)"
-                verdictDetails = "高频上限严重锁死在 ${String.format("%.1f", cutoffHz / 1000.0f)} kHz，有极高嫌疑是低码率 MP3 强行扩容或假无损。"
+                verdict = context.getString(R.string.verdict_fake_lossless)
+                verdictDetails = context.getString(R.string.verdict_fake_lossless_detail, String.format("%.1f", cutoffHz / 1000.0f))
                 isLossless = false
             }
         }
@@ -261,7 +263,7 @@ object SpectrogramGenerator {
         bmp.setPixels(pixels, 0, numFrames, 0, 0, numFrames, numBins)
 
         Log.d(TAG, "Acoustic detection completed: $cutoffHz Hz -> $verdict")
-        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless)
+        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless, sampleRate)
     }
 
     private fun fft(re: FloatArray, im: FloatArray) {

@@ -1,0 +1,475 @@
+<resources>
+    <string name="app_name">AURALIS</string>
+
+    <!-- Home tabs -->
+    <string name="tab_all_songs">All Songs</string>
+    <string name="tab_favorites">Favorites</string>
+    <string name="tab_recent">Recently Played</string>
+    <string name="tab_albums">Albums</string>
+    <string name="tab_artists">Artists</string>
+    <string name="tab_playlists">Playlists</string>
+    <string name="tab_history">Listening History</string>
+
+    <!-- Common -->
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="action_share">Share</string>
+    <string name="action_timer">Timer</string>
+    <string name="action_bind">Bind</string>
+    <string name="action_send">Send</string>
+    <string name="action_unbind">Unbind</string>
+    <string name="favorite_add">Favorite</string>
+    <string name="favorite_added">Favorited</string>
+
+    <!-- Accessibility (mini player) -->
+    <string name="content_desc_cover">Cover</string>
+    <string name="content_desc_previous">Previous</string>
+    <string name="content_desc_next">Next</string>
+    <string name="content_desc_play_pause">Play/Pause</string>
+
+    <!-- About screen -->
+    <string name="about_title">About Auralis</string>
+    <string name="about_subtitle">Version · Device nickname &amp; ID</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Theme, audio quality, library &amp; sync</string>
+    <string name="settings_section_other">Other</string>
+    <string name="sleep_timer_title">Sleep Timer</string>
+    <string name="sleep_timer_subtitle">Pause playback after a timer</string>
+    <string name="language_label">Language</string>
+    <string name="language_subtitle">Only part of the UI is translated so far, more coming</string>
+
+    <!-- Nearby Auralis / Listen Together -->
+    <string name="no_nearby_devices">No online Auralis devices nearby</string>
+    <string name="share_to_nearby_device">Share to nearby device</string>
+    <string name="nearby_allow_listen_together">Let nearby devices listen along</string>
+    <string name="nearby_hosting_on_subtitle">On · bound devices can sync along</string>
+    <string name="nearby_hosting_off_subtitle">When on, bound devices can follow what you\'re playing in real time</string>
+    <string name="bound_label">Bound</string>
+    <string name="no_devices_nearby">No devices nearby</string>
+    <string name="new_devices_found">New devices found</string>
+    <string name="action_push_current_song">Push current song</string>
+    <string name="action_pick_songs_to_send">Pick songs to send</string>
+    <string name="listening_together_active">Listening together · tap to leave</string>
+    <string name="listen_along">Listen along</string>
+    <string name="room_song_missing">This device doesn\'t have \"%1$s\" — can\'t follow along</string>
+
+    <!-- Full screen player -->
+    <string name="lyrics_cache_cleared">Lyrics &amp; cover cache cleared, next refresh will skip this result</string>
+    <string name="lyrics_import_success">Lyrics imported successfully!</string>
+    <string name="import_failed">Import failed</string>
+    <string name="unknown_album">Unknown Album</string>
+    <string name="unknown_genre">Unknown Genre</string>
+    <string name="unknown_year">Unknown Year</string>
+    <string name="unknown_value">Unknown</string>
+    <string name="never_played">Never played</string>
+    <string name="gain_not_detected">Not detected (0.00 dB)</string>
+    <string name="parse_detail_failed">Failed to parse details: %1$s</string>
+
+    <!-- Song Detail Panel -->
+    <string name="detail_section_basic">Basic Info</string>
+    <string name="detail_section_audio_specs">Audio Specs</string>
+    <string name="detail_section_file_stats">File &amp; Stats</string>
+    <string name="detail_title">Title</string>
+    <string name="detail_artist">Artist</string>
+    <string name="detail_album">Album</string>
+    <string name="detail_genre">Genre</string>
+    <string name="detail_year">Year</string>
+    <string name="detail_quality">Quality</string>
+    <string name="detail_sample_rate">Sample Rate</string>
+    <string name="detail_bit_depth">Bit Depth</string>
+    <string name="detail_channels">Channels</string>
+    <string name="detail_channels_spatial">Spatial Audio</string>
+    <string name="detail_channels_stereo">Stereo</string>
+    <string name="detail_bitrate">Bitrate</string>
+    <string name="detail_gain">Replay Gain</string>
+    <string name="detail_size">Size</string>
+    <string name="detail_duration">Duration</string>
+    <string name="detail_play_count">Play Count</string>
+    <string name="detail_play_count_unit">plays</string>
+    <string name="detail_last_played">Last Played</string>
+    <string name="detail_last_modified">Modified</string>
+    <string name="detail_path">Path</string>
+    <string name="action_share_song">Share song</string>
+    <string name="share_song_text">Now playing: %1$s - %2$s</string>
+    <string name="bitperfect_speed_locked">Bit-perfect is on — speed can\'t be changed in hardware passthrough mode</string>
+    <string name="ab_point_a_set">Point A set</string>
+    <string name="ab_point_b_set">Point B set, loop started</string>
+    <string name="ab_point_b_must_after_a">Point B must be after point A</string>
+    <string name="ab_cancelled">A-B cancelled</string>
+    <string name="action_select_lyrics">Select lyrics</string>
+    <string name="action_delete_lyrics_cover">Delete lyrics &amp; cover</string>
+    <string name="action_select_cover">Select cover</string>
+    <string name="refreshing_covers_start">Refreshing online covers in bulk…</string>
+    <string name="refreshed_covers_count">Refreshed %1$d songs without embedded covers</string>
+    <string name="action_refresh_all_covers">Refresh all online covers</string>
+    <string name="added_to_favorites">Added to favorites ❤️</string>
+    <string name="action_refresh_cover">Refresh cover</string>
+    <string name="song_details_title">Song Details</string>
+    <string name="acoustic_audit_title">🔍 Acoustic Quality Audit</string>
+    <string name="decoding_pcm_fft">Decoding PCM and computing FFT spectrogram...</string>
+    <string name="action_run_acoustic_audit">Run acoustic audit (Spek)</string>
+    <string name="spectrogram_disclaimer">※ Acoustic features are auto-decoded and analyzed by Auralis On-Demand Spectrogram. Silent passages or certain classic tracks may cause slight inaccuracies — results are for reference only.</string>
+    <string name="action_close">Close</string>
+    <string name="confirm_delete_lyrics_cache_title">Delete lyrics &amp; cover cache?</string>
+    <string name="confirm_delete_lyrics_cache_body">This will blacklist the current lyrics; future refreshes will skip this result and try other sources.</string>
+    <string name="dont_show_again">Don\'t ask again</string>
+    <string name="action_confirm_delete">Confirm delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="lyrics_multi_source_title">Multi-Source Lyrics Picker</string>
+    <string name="search_keyword_label">Search keyword</string>
+    <string name="action_search">Search</string>
+    <string name="fetching_multi_platform_lyrics">Fetching lyrics from multiple platforms...</string>
+    <string name="no_matching_lyrics_found">No matching lyrics found, try a different search term</string>
+    <string name="smart_recommendation">✨ Smart Recommendation</string>
+    <string name="lyrics_applied_from">Lyrics applied from [%1$s]!</string>
+    <string name="lyrics_fetch_failed">Failed to fetch lyrics, try another option</string>
+    <string name="action_collapse">Collapse</string>
+    <string name="action_expand_more">Expand more</string>
+    <string name="fetching_multi_platform_covers">Fetching covers from multiple platforms...</string>
+    <string name="no_covers_found">No covers found</string>
+    <string name="cover_applied_smoothly">Cover applied smoothly in real time! ❤️</string>
+    <string name="action_drag_to_reorder">Drag to reorder</string>
+    <string name="action_select_and_apply">Select and apply</string>
+    <string name="duration_label">Duration: %1$d:%2$s</string>
+    <string name="spectrogram_cutoff_label">Frequency cutoff: %1$s kHz (Nyquist: %2$s kHz)</string>
+
+    <!-- Home / MusicAppScreen -->
+    <string name="sleep_timer_paused_toast">Sleep timer: playback paused 💤</string>
+    <string name="delete_authorized_success">Deleted with permission</string>
+    <string name="file_deleted_externally_cleanup">File was deleted externally, cleaning up the list...</string>
+    <string name="already_next_song">Already the next song</string>
+    <string name="moved_to_play_next">Moved to play next</string>
+    <string name="added_to_play_next">Added to play next</string>
+    <string name="delete_permanent_success">Permanently deleted</string>
+    <string name="delete_failed_file_locked">Delete failed, the file may be in use</string>
+    <string name="delete_restricted">Delete restricted</string>
+    <string name="delete_error">Error deleting</string>
+    <string name="connecting_to_pc">Connecting to PC to get the list...</string>
+    <string name="already_up_to_date">Your phone is already up to date, nothing missing!</string>
+    <string name="connect_failed_check_ip">Connection failed, check the PC\'s IP and that you\'re on the same Wi-Fi</string>
+    <string name="bulk_import_done">Bulk import done: %1$d succeeded, %2$d unmatched</string>
+    <string name="new_song_auto_imported">New song auto-imported!</string>
+    <string name="hide_lyrics_overlay">Hide floating lyrics</string>
+    <string name="need_music_access_title">Music file access needed</string>
+    <string name="need_music_access_subtitle">Please allow audio, notification &amp; microphone permissions to scan your library, show playback controls, and enable visual effects</string>
+    <string name="action_grant_permission">Grant permission</string>
+    <string name="list_refreshed">List refreshed</string>
+    <string name="empty_favorites_title">No favorites yet</string>
+    <string name="empty_library_title">Library is empty</string>
+    <string name="empty_favorites_subtitle">Tap a song\'s menu to add music you like to favorites</string>
+    <string name="empty_library_subtitle">Pull down to refresh your local library, or add scan folders in Settings</string>
+    <string name="no_play_history_title">No listening history yet</string>
+    <string name="no_play_history_subtitle">Listen to a few more songs, and your top played will show up here</string>
+    <string name="sort_by_count">By play count</string>
+    <string name="sort_by_recent">By recently played</string>
+    <string name="action_new_custom_playlist">New custom playlist</string>
+    <string name="empty_playlists_title">No playlists yet</string>
+    <string name="empty_playlists_subtitle">Tap the button above to create your first custom playlist</string>
+    <string name="created_at_label">Created %1$s</string>
+    <string name="playlist_exported_to">Exported to Download/Auralis/Playlists: %1$s</string>
+    <string name="export_failed">Export failed</string>
+    <string name="action_export_playlist">Export playlist</string>
+    <string name="song_count_label">%1$d songs</string>
+    <string name="empty_playlist_songs_title">This playlist is empty</string>
+    <string name="empty_playlist_songs_subtitle">Long-press or use the menu in the song list to add to this playlist</string>
+    <string name="removed_from_playlist">Removed from playlist</string>
+    <string name="sleep_timer_current_status">Current: pausing in %1$dm %2$ds</string>
+    <string name="action_cancel_timer">Cancel timer</string>
+    <string name="sleep_15min">15 minutes</string>
+    <string name="sleep_30min">30 minutes</string>
+    <string name="sleep_45min">45 minutes</string>
+    <string name="sleep_1hr">1 hour</string>
+    <string name="sleep_90min">90 minutes</string>
+    <string name="custom_minutes_label">Custom time (minutes)</string>
+    <string name="invalid_minutes_input">Please enter a valid number of minutes</string>
+    <string name="action_confirm_custom">Confirm custom time</string>
+    <string name="deep_scan_started">Starting deep scan...</string>
+    <string name="deep_scan_done">Deep scan complete!</string>
+    <string name="library_clean_no_duplicates">Great! Your library is clean, no duplicate songs ✨</string>
+    <string name="receiving_ellipsis">Receiving…</string>
+    <string name="received_song">✅ Received: %1$s</string>
+    <string name="download_failed">❌ Download failed</string>
+    <string name="action_clean_duplicates">Clean up duplicates</string>
+    <string name="duplicate_group_label">Group %1$d · %2$s</string>
+    <string name="physical_path_label">File path: %1$s</string>
+    <string name="parsing_ellipsis">Parsing...</string>
+    <string name="bit_depth_label">Bit depth: %1$s</string>
+    <string name="sample_rate_label">Sample rate: %1$s</string>
+    <string name="replay_gain_label">Volume gain (ReplayGain): %1$s</string>
+    <string name="found_new_songs_title">New songs found</string>
+    <string name="action_select_all">Select all</string>
+    <string name="has_lyrics_suffix"> • Has lyrics</string>
+    <string name="switched_to_background_sync">Switched to background sync, pull down the notification shade to check progress</string>
+    <string name="action_background_sync">Background sync</string>
+    <string name="syncing_title">Syncing</string>
+    <string name="add_to_playlist_title">Add to playlist</string>
+    <string name="action_new_playlist">New playlist</string>
+    <string name="no_custom_playlists">No custom playlists yet</string>
+    <string name="added_to_playlist_named">Added to %1$s</string>
+    <string name="add_to_playlist_failed">Failed to add, or already in this playlist</string>
+    <string name="playlist_name_label">Playlist name</string>
+    <string name="playlist_created_added_song">Created and song added</string>
+    <string name="playlist_created_success">Playlist created</string>
+    <string name="action_confirm">Confirm</string>
+
+    <!-- Settings screen -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="theme_color_label">Theme color</string>
+    <string name="custom_hue_label">Custom hue</string>
+    <string name="dark_light_mode_label">Dark / Light mode</string>
+    <string name="follow_system">Follow system</string>
+    <string name="dark_mode">Dark</string>
+    <string name="light_mode">Light</string>
+    <string name="fullscreen_player_bg_label">Full-screen player background</string>
+    <string name="visualizer_sensitivity_label">Visualizer sensitivity</string>
+    <string name="settings_section_audio_quality">Audio Quality</string>
+    <string name="volume_normalization_title">Volume normalization</string>
+    <string name="replaygain_subtitle">ReplayGain · auto-balances loudness across songs</string>
+    <string name="usb_passthrough_title">USB bit-perfect passthrough</string>
+    <string name="bitperfect_subtitle_needs_android14">Bit-perfect · requires Android 14+</string>
+    <string name="bitperfect_subtitle_active">Bit-perfect · bypassing system mixer ✓</string>
+    <string name="bitperfect_subtitle_needs_usb_dac">Active once a USB DAC is connected</string>
+    <string name="crossfade_title">Crossfade</string>
+    <string name="state_off">Off</string>
+    <string name="crossfade_subtitle">Smooths the audio transition between tracks, no more abrupt cuts</string>
+    <string name="settings_section_lyrics">Lyrics</string>
+    <string name="lyrics_overlay_subtitle">See the current lyric line above the mini player without opening the full-screen player</string>
+    <string name="lyrics_overlay_title">Floating Lyrics</string>
+    <string name="online_lyrics_search_title">Online lyrics search</string>
+    <string name="online_lyrics_search_subtitle">Automatically fetched online when there\'s no local LRC file</string>
+    <string name="lyrics_source_priority_label">Preferred source</string>
+    <string name="source_auto">Auto</string>
+    <string name="source_netease">NetEase Cloud</string>
+    <string name="source_qqmusic">QQ Music</string>
+    <string name="source_kugou">KuGou</string>
+    <string name="action_batch_import_lrc">Bulk import LRC</string>
+    <string name="batch_import_lrc_subtitle">Pick multiple lyric files from the file manager</string>
+    <string name="settings_section_library">Library</string>
+    <string name="scan_all_music_label">Scan entire device</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_add_scan_path">Add scan folder</string>
+    <string name="add_scan_path_subtitle">Limit scanning to specific folders instead of the whole device</string>
+    <string name="action_deep_rescan">Deep rescan</string>
+    <string name="deep_rescan_subtitle">Clear the cache and re-parse every song</string>
+    <string name="clean_duplicates_subtitle">Smart-scan and clean up duplicate tracks</string>
+    <string name="settings_section_connectivity">Connectivity &amp; Sync</string>
+    <string name="pc_speaker_mode_title">PC wired speaker mode</string>
+    <string name="pc_speaker_mode_listening">Listening on port…</string>
+    <string name="pc_speaker_mode_subtitle">Turn your phone into a zero-latency speaker for your PC</string>
+    <string name="sync_save_path_title">Sync save location</string>
+    <string name="configured_label">Configured</string>
+    <string name="no_download_location_set">Download location not set yet</string>
+    <string name="pc_lan_ip_label">PC LAN IP</string>
+    <string name="accept_nearby_push_title">Accept pushes from nearby devices</string>
+    <string name="accept_nearby_push_subtitle_on">You\'ll get a prompt when a device shares a song</string>
+    <string name="accept_nearby_push_subtitle_off">Off — not accepting any incoming requests</string>
+    <string name="nearby_auralis_title">Nearby Auralis</string>
+    <string name="nearby_auralis_subtitle">Transfer songs with other devices on the same Wi-Fi</string>
+    <string name="theme_dynamic_cover">Follow album cover</string>
+    <string name="theme_obsidian">Near-AMOLED black</string>
+    <string name="theme_midnight">Deep navy blue</string>
+    <string name="theme_amber">Warm amber brown</string>
+    <string name="theme_rose">Deep rose</string>
+    <string name="theme_aurora">Aurora green</string>
+    <string name="theme_violet">Dreamy violet</string>
+    <string name="theme_solar">Midday gold</string>
+
+    <!-- Theme preset short names -->
+    <string name="preset_name_dynamic">Album Color</string>
+    <string name="preset_name_obsidian">Obsidian</string>
+    <string name="preset_name_midnight">Midnight</string>
+    <string name="preset_name_amber">Amber</string>
+    <string name="preset_name_rose">Rose</string>
+    <string name="preset_name_jade">Jade</string>
+    <string name="preset_name_aurora">Aurora</string>
+    <string name="preset_name_violet">Violet</string>
+    <string name="preset_name_solar">Solar</string>
+    <string name="preset_name_custom">Custom</string>
+
+    <!-- Spectrogram acoustic audit verdicts -->
+    <string name="verdict_true_lossless">🌟 Genuine Hi-Res Master / True Lossless</string>
+    <string name="verdict_true_lossless_detail">Frequency cutoff reaches %1$s kHz — acoustic profile fully matches hi-fi/true-lossless specs.</string>
+    <string name="verdict_upscaled_lossy">⚠️ Likely Upscaled from MP3-320kbps</string>
+    <string name="verdict_upscaled_lossy_detail">Frequency response rolls off at %1$s kHz, a typical sign of 320kbps high-frequency cutoff.</string>
+    <string name="verdict_fake_lossless">❌ Highly Suspected Fake Lossless / MP3-128kbps</string>
+    <string name="verdict_fake_lossless_detail">Frequency cutoff is hard-capped at %1$s kHz — strongly suggests a low-bitrate MP3 forcibly upsampled as fake lossless.</string>
+
+    <!-- Full-screen player background animation modes -->
+    <string name="bgmode_static">Static Gradient</string>
+    <string name="bgmode_breathing">Breathing Pulse</string>
+    <string name="bgmode_fluid">Fluid Drift</string>
+    <string name="bgmode_horizon">Deep Horizon</string>
+    <string name="bgmode_classic_eq">Fine EQ (Pro)</string>
+    <string name="bgmode_stardust">Stardust Flare</string>
+
+    <!-- PC sync -->
+    <string name="cannot_connect_to_pc">Can\'t connect to the PC</string>
+    <string name="cannot_access_selected_folder">Can\'t access the selected folder</string>
+    <string name="scanning_local_directory">Scanning local directory, warming up the fast engine...</string>
+    <string name="incomplete_file_redownload">%1$s Incomplete file found, redownloading: %2$s</string>
+    <string name="downloading_audio">%1$s Downloading audio: %2$s</string>
+    <string name="audio_exists_complete_skip">%1$s Audio already complete, skipping: %2$s</string>
+    <string name="completing_lyrics">%1$s Fetching missing lyrics: %2$s</string>
+    <string name="sync_all_done">🎉 All done!</string>
+    <string name="sync_error_prefix">❌ Error: %1$s</string>
+    <string name="preparing_download">Preparing download...</string>
+    <string name="music_sync_progress_title">Music sync progress</string>
+    <string name="sync_complete_celebration">🎉 Sync complete!</string>
+    <string name="lan_music_sync_channel">LAN Music Sync</string>
+
+    <!-- NetEase Cookie auth (anti -462 block) -->
+    <string name="netease_cookie_auth_title">NetEase API Auth (Anti-Block)</string>
+    <string name="netease_cookie_auth_body">If cover/lyrics scraping fails (-462 blocked), log into NetEase Music\'s web player on a computer, open DevTools (F12), grab the Cookie from any request in the Network tab, and paste it below.</string>
+    <string name="custom_cookie_label">Custom Cookie</string>
+
+    <!-- Common UI components (song/album/artist rows, stats card, sleep timer banner) -->
+    <string name="never_played_short">Never</string>
+    <string name="play_count_times">%1$d plays</string>
+    <string name="song_count_with_artist">%1$s · %2$d songs</string>
+    <string name="song_count_songs_suffix">%1$d songs</string>
+    <string name="listening_stats_title">Listening Stats</string>
+    <string name="listening_stats_summary">%1$d total plays · %2$d favorites</string>
+    <string name="pause_in_label">Pausing in %1$s</string>
+
+    <!-- Nearby Auralis -->
+    <string name="scanning_label">Scanning</string>
+    <string name="action_rescan">Rescan</string>
+    <string name="bind_device_title">Bind device?</string>
+    <string name="bind_device_body">Adding \"%1$s\" to your bound list means it\'ll show up at the top next time, no rescanning needed.</string>
+    <string name="action_not_now">Not now</string>
+    <string name="transfer_complete">✅ Transfer complete!</string>
+    <string name="transfer_failed_maybe_not_receiving">❌ Transfer failed, the other device may not be accepting</string>
+    <string name="online_bound_label">Online · Bound</string>
+    <string name="offline_bound_label">Offline · Bound</string>
+    <string name="select_songs_to_send_title">Select songs to send</string>
+    <string name="selected_count_label">%1$d selected</string>
+    <string name="search_song_artist_placeholder">Search title, artist…</string>
+    <string name="action_sort">Sort</string>
+    <string name="sort_ascending">Ascending</string>
+    <string name="sort_descending">Descending</string>
+    <string name="sort_by_name">By name</string>
+    <string name="sort_by_artist">By artist</string>
+    <string name="sort_by_album">By album</string>
+    <string name="sort_by_date">By date</string>
+    <string name="sort_by_size">By size</string>
+    <string name="sort_by_play_count">By play count</string>
+    <string name="no_matching_songs">No matching songs found</string>
+    <string name="transferring_ellipsis">Transferring…</string>
+    <string name="send_count_label">Send %1$d songs</string>
+    <string name="wants_to_share_song">Wants to share a song with you</string>
+    <string name="has_lyrics_badge">📄 Has lyrics</string>
+    <string name="action_receive_now">Receive now</string>
+    <string name="action_not_now_alt">Not now</string>
+    <string name="currently_playing_label">Currently playing</string>
+    <string name="no_nearby_devices_detail">No online Auralis devices nearby\nMake sure the other device is on the same Wi-Fi and has the app open</string>
+    <string name="pushed_to_device">✅ Pushed to %1$s</string>
+    <string name="push_failed">❌ Push failed</string>
+
+    <!-- Background playback service -->
+    <string name="audio_quality_hires_verified">Verified hi-res audio ✓</string>
+    <string name="audio_quality_maybe_mp3_320">Possibly re-encoded from MP3 320kbps</string>
+    <string name="audio_quality_suspect_mp3_256">Likely re-encoded from MP3 256kbps</string>
+    <string name="audio_quality_suspect_mp3_128_192">Likely re-encoded from MP3 128~192kbps</string>
+    <string name="audio_quality_suspect_aac_low_bitrate">Likely re-encoded from AAC / low bitrate</string>
+    <string name="audio_quality_suspect_very_low_bitrate">Likely from a very low bitrate source</string>
+    <string name="dac_exclusive_active">DAC exclusive mode active: %1$s kHz</string>
+    <string name="dac_exclusive_failed_unsupported">DAC exclusive mode failed: device doesn\'t support this spec</string>
+    <string name="android_mixing_restored">Restored Android system audio mixing</string>
+    <string name="browse_favorites">❤️ Favorites</string>
+
+    <!-- Song list / context menu -->
+    <string name="first_track_label">song(s)</string>
+    <string name="sort_ascending_az">A-Z / Ascending</string>
+    <string name="sort_descending_za">Z-A / Descending</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_sync">Sync</string>
+    <string name="search_song_format_placeholder">Search title, artist, format…</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_play_next">Play next</string>
+    <string name="action_add_to_playlist_ellipsis">Add to playlist...</string>
+    <string name="action_remove_from_playlist">Remove from playlist</string>
+    <string name="action_import_lrc_lyrics">Import LRC lyrics</string>
+    <string name="action_delete_permanently">Delete file permanently</string>
+    <string name="menu_label">Menu</string>
+    <string name="confirm_delete_file_body">This will permanently delete the file from your phone\'s storage — it can\'t be undone.</string>
+    <string name="action_delete">Delete</string>
+
+    <!-- Listening history -->
+    <string name="action_back">Back</string>
+    <string name="this_year_favorite">Top this year</string>
+    <string name="this_month_favorite">Top this month</string>
+    <string name="month_all_year">Whole year</string>
+    <string name="month_1">Jan</string>
+    <string name="month_2">Feb</string>
+    <string name="month_3">Mar</string>
+    <string name="month_4">Apr</string>
+    <string name="month_5">May</string>
+    <string name="month_6">Jun</string>
+    <string name="month_7">Jul</string>
+    <string name="month_8">Aug</string>
+    <string name="month_9">Sep</string>
+    <string name="month_10">Oct</string>
+    <string name="month_11">Nov</string>
+    <string name="month_12">Dec</string>
+    <string name="plays_this_year">Plays this year</string>
+    <string name="plays_this_month">Plays this month</string>
+    <string name="plays_count_label">%1$d plays</string>
+    <string name="total_listening_label">Total listening time</string>
+    <string name="year_play_distribution">%1$s play distribution</string>
+    <string name="month_daily_plays">Daily plays for %2$d/%1$s</string>
+    <string name="play_count_suffix">%1$d plays</string>
+    <string name="no_listening_history">No listening history yet</string>
+    <string name="play_some_songs_hint">Play a few songs and check back here</string>
+
+    <!-- About screen -->
+    <string name="about_tagline">A local lossless music player</string>
+    <string name="easter_egg_music_fanatic">🎉 You\'re a true music fanatic!</string>
+    <string name="features_title">Features</string>
+    <string name="feature_hires_bitperfect">Hi-Res / DSD / Bit-perfect playback</string>
+    <string name="feature_multi_source_lyrics">Multi-source lyrics matching (NetEase / QQ / KuGou)</string>
+    <string name="feature_dynamic_theme">Dynamic theme from album covers</string>
+    <string name="feature_android_auto">Android Auto driving mode</string>
+    <string name="feature_wireless_transfer">Wireless song transfer between Auralis devices</string>
+    <string name="feature_equalizer">Equalizer / Bass Boost / loudness enhancement</string>
+    <string name="feature_listening_stats">Listening history stats</string>
+    <string name="credits_title">Credits</string>
+    <string name="credit_design_integration_label">Design &amp; Integration</string>
+    <string name="credit_ai_assist_label">AI coding assistance</string>
+    <string name="privacy_title">Privacy</string>
+    <string name="privacy_body">Auralis doesn\'t collect any personal data or upload any files. All music files, lyrics, and covers are stored on your local device. Network access is only used to fetch lyrics and cover metadata, and for direct device-to-device transfers over the local network.</string>
+    <string name="nearby_transfer_device_info_title">Nearby Transfer · Device Info</string>
+    <string name="device_nickname_label">Device nickname</string>
+    <string name="action_save">Save</string>
+    <string name="action_edit">Edit</string>
+    <string name="device_id_label">Device ID</string>
+    <string name="copyright_line">© 2026 白开水 · All Rights Reserved\nAI-assisted code integration by Claude</string>
+
+    <!-- Equalizer -->
+    <string name="equalizer_bypassed_title">Equalizer bypassed</string>
+    <string name="equalizer_bypassed_body">USB bit-perfect passthrough is on — audio goes straight to the DAC, so the system EQ can\'t engage.</string>
+    <string name="action_understood">Got it</string>
+    <string name="audio_session_not_ready">AudioSessionId isn\'t ready yet — play a song first, then open the EQ.</string>
+    <string name="equalizer_request_rejected">Your phone\'s system rejected the global equalizer request: %1$s</string>
+    <string name="equalizer_unavailable_title">Equalizer unavailable</string>
+    <string name="unknown_error">Unknown error</string>
+    <string name="audiophile_equalizer_title">Equalizer</string>
+    <string name="action_save_preset">Save preset</string>
+    <string name="my_presets_label">My presets</string>
+    <string name="system_presets_label">System presets</string>
+    <string name="action_done">Done</string>
+    <string name="action_reset">Reset</string>
+    <string name="preset_name_label">Preset name</string>
+    <string name="unknown_title">Unknown Title</string>
+
+    <!-- Common player UI components -->
+    <string name="lyrics_tab_label">Lyrics</string>
+    <string name="playback_speed_title">Playback Speed (Natural Pitch)</string>
+    <string name="current_speed_label">Current speed: %1$s</string>
+    <string name="natural_speed_hint">Natural speed algorithm is on. Slowing down thickens the voice, speeding up thins it — avoiding the metallic artifacts of forced pitch correction, for the cleanest lossless sound.</string>
+    <string name="action_reset_1x">Reset to 1.0x</string>
+    <string name="no_lyrics_yet">No lyrics yet</string>
+    <string name="action_import_lrc">Import LRC</string>
+    <string name="playback_queue_title">Playback Queue</string>
+    <string name="song_count_suffix">%1$d songs</string>
+</resources>

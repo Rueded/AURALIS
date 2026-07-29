@@ -35,7 +35,7 @@ object SyncManager {
         val baseUrl = "http://$serverIp:5000"
         val request = Request.Builder().url("$baseUrl/api/sync").build()
         val response = client.newCall(request).execute()
-        if (!response.isSuccessful) throw Exception("无法连接到电脑")
+        if (!response.isSuccessful) throw Exception(context.getString(R.string.cannot_connect_to_pc))
 
         val json = response.body?.string() ?: "[]"
         val type = object : TypeToken<List<RemoteSong>>() {}.type
@@ -72,9 +72,9 @@ object SyncManager {
         try {
             val baseUrl = "http://$serverIp:5000"
             val rootFolder = DocumentFile.fromTreeUri(context, saveFolderUri)
-                ?: throw Exception("无法访问所选文件夹")
+                ?: throw Exception(context.getString(R.string.cannot_access_selected_folder))
 
-            onLog("正在扫描本地目录，准备极速引擎...")
+            onLog(context.getString(R.string.scanning_local_directory))
             // 一次性把所有文件加载到内存字典里，干掉 findFile() 卡顿毒瘤
             val existingFiles = mutableMapOf<String, DocumentFile>()
             rootFolder.listFiles().forEach { file ->
@@ -93,12 +93,12 @@ object SyncManager {
                 val needsDownload = audioFile == null || audioFile.length() != song.size
 
                 if (needsDownload) {
-                    if (audioFile != null) onLog("$progressPrefix 发现不完整文件，重新下载: ${song.filename}")
-                    else onLog("$progressPrefix 正在下载音频: ${song.filename}")
+                    if (audioFile != null) onLog(context.getString(R.string.incomplete_file_redownload, progressPrefix, song.filename))
+                    else onLog(context.getString(R.string.downloading_audio, progressPrefix, song.filename))
 
                     downloadFile(context, "$baseUrl/download/${song.filename}", song.filename, rootFolder, existingFiles, onProgress)
                 } else {
-                    onLog("$progressPrefix 音频已存在且完整，跳过: ${song.filename}")
+                    onLog(context.getString(R.string.audio_exists_complete_skip, progressPrefix, song.filename))
                     onProgress(1f)
                 }
 
@@ -107,16 +107,16 @@ object SyncManager {
                     val lrcFile = existingFiles[lrcFilename]
 
                     if (lrcFile == null) {
-                        onLog("$progressPrefix 正在补全歌词: $lrcFilename")
+                        onLog(context.getString(R.string.completing_lyrics, progressPrefix, lrcFilename))
                         downloadFile(context, "$baseUrl/download/$lrcFilename", lrcFilename, rootFolder, existingFiles) { }
                     }
                 }
             }
-            onLog("🎉 全部处理完成！")
+            onLog(context.getString(R.string.sync_all_done))
             delay(1500)
             onComplete()
         } catch (e: Exception) {
-            onLog("❌ 错误: ${e.message}")
+            onLog(context.getString(R.string.sync_error_prefix, e.message))
             delay(2000)
             onComplete()
         }

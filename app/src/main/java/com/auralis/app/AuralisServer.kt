@@ -62,6 +62,9 @@ class AuralisServer(
                 uri == "/auralis/push" && method == Method.POST ->
                     handlePush(session)
 
+                uri == "/auralis/room/state" && method == Method.GET ->
+                    handleRoomState()
+
                 else -> newFixedLengthResponse(
                     Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found"
                 )
@@ -175,6 +178,16 @@ class AuralisServer(
         AuralisPushManager.post(req)
 
         return jsonResponse(mapOf("ok" to true))
+    }
+
+    // GET /auralis/room/state → “一起听歌”：本机作为房主时，把当前播放状态原样吐出去
+    private fun handleRoomState(): Response {
+        val state = RoomManager.hostState.value
+        return if (RoomManager.isHosting.value && state != null) {
+            jsonResponse(state)
+        } else {
+            newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "not_hosting")
+        }
     }
 
     private fun jsonResponse(data: Any): Response =

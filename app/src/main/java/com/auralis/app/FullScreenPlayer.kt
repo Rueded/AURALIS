@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.ComponentName
 import android.content.ContentUris
@@ -132,7 +133,7 @@ fun FullScreenPlayer(
     onFavoriteClick: () -> Unit,        // 👇 新增
     onSleepTimerClick: () -> Unit, onBackClick: () -> Unit, onArtistClick: (String) -> Unit
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             // 👇 核心修复：添加拦截盾牌
@@ -146,13 +147,16 @@ fun FullScreenPlayer(
     ) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        val configuration = LocalConfiguration.current
-        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val activity = context as? android.app.Activity
+        // 👇 之前这里用 LocalConfiguration.current.orientation 判断横竖屏，
+        // 但这台设备上无论怎么转屏幕，读到的值好像都不会变化（不确定是哪一层没有正确
+        // 传播 Configuration 更新）。直接测量 BoxWithConstraints 给出的实际可用宽高，
+        // 宽度 > 高度就是横屏——这个值一定跟着真实布局尺寸走，不会有任何中间层能把它冻住。
+        val isLandscape = maxWidth > maxHeight
+        val activity = LocalActivity.current
         val fallbackColors = remember(audioPath) { generateElegantColors(audioPath) }
 
         // 👇 智能断点：判断当前设备是否为“高度极其受限”的手机横屏
-        val isCompactLandscape = isLandscape && configuration.screenHeightDp < 500
+        val isCompactLandscape = isLandscape && maxHeight < 500.dp
 
         val prefs =
             remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
@@ -181,6 +185,11 @@ fun FullScreenPlayer(
         var detailedInfo by remember { mutableStateOf("") }
 
         var lrcLines by remember { mutableStateOf<List<LrcLine>>(emptyList()) }
+        // 不管这份歌词是本地解析还是在线抓的，只要在全屏播放器这边更新了，
+        // 就顺手同步一份到全局状态里，这样悬浮歌词 overlay（不需要打开全屏播放器）也能用上。
+        LaunchedEffect(lrcLines, audioPath) {
+            PlayerStateHolder.updateLyrics(audioPath, lrcLines)
+        }
         var showLyrics by remember { mutableStateOf(false) }
         var isFullscreenLyrics by remember { mutableStateOf(false) }
         var lyricsSource by remember { mutableStateOf(LyricsSource.LOCAL) }
@@ -218,7 +227,7 @@ fun FullScreenPlayer(
                     lyricsSource = LyricsSource.LOCAL
                     coverForceNetwork = true
                     coverRefreshNonce++
-                    android.widget.Toast.makeText(context, "歌词与封面缓存已清除，下次刷新将跳过此结果", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.lyrics_cache_cleared), android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -306,7 +315,7 @@ fun FullScreenPlayer(
                             withContext(Dispatchers.Main) {
                                 lrcLines = newLines; Toast.makeText(
                                 context,
-                                "歌词导入成功！",
+                                context.getString(R.string.lyrics_import_success),
                                 Toast.LENGTH_SHORT
                             ).show()
                             }
@@ -314,7 +323,7 @@ fun FullScreenPlayer(
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(
                                     context,
-                                    "导入失败",
+                                    context.getString(R.string.import_failed),
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
@@ -391,6 +400,7 @@ fun FullScreenPlayer(
             }
 
             withContext(Dispatchers.IO) {
+                val r = MediaMetadataRetriever()
                 try {
                     // 1. 【核心优化】所有的耗时读取全在这里进行，删掉外面多余的查询
                     val songDao = AppDatabase.getDatabase(context).songDao()
@@ -405,22 +415,21 @@ fun FullScreenPlayer(
                     val playCount = dbSong?.playCount ?: 0
                     val lastPlayedMs = dbSong?.lastPlayed ?: 0L
 
-                    val r = MediaMetadataRetriever()
                     r.setDataSource(audioPath)
 
                     // 现场解析变动参数
                     val br = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L
-                    val albumStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() } ?: "未知专辑"
-                    val genreStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)?.trim()?.takeIf { it.isNotBlank() } ?: "未知流派"
-                    val yearStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)?.trim()?.takeIf { it.isNotBlank() } ?: "未知年份"
+                    val albumStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_album)
+                    val genreStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)?.trim()?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_genre)
+                    val yearStr = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)?.trim()?.takeIf { it.isNotBlank() } ?: context.getString(R.string.unknown_year)
                     val durationMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
 
                     var ch = 2
                     var isAudioVivid = false
 
                     // 检测声道和 Audio Vivid
+                    val extractor = android.media.MediaExtractor()
                     try {
-                        val extractor = android.media.MediaExtractor()
                         extractor.setDataSource(audioPath)
                         for (i in 0 until extractor.trackCount) {
                             val fmt = extractor.getTrackFormat(i)
@@ -432,8 +441,11 @@ fun FullScreenPlayer(
                                 if (mime.contains("av3a", true)) isAudioVivid = true
                             }
                         }
+                    } catch (e: Exception) {
+                        android.util.Log.w("Player", "MediaExtractor parse failed: ${e.message}")
+                    } finally {
                         extractor.release()
-                    } catch (e: Exception) {}
+                    }
 
                     // 2. 更新 Spec 状态
                     spec = AudioSpec(
@@ -449,42 +461,43 @@ fun FullScreenPlayer(
                     val sizeStr = String.format(java.util.Locale.US, "%.2f MB", file.length() / (1024.0 * 1024.0))
 
                     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                    val lastModifiedStr = if (file.exists()) sdf.format(java.util.Date(file.lastModified())) else "未知"
-                    val lastPlayedStr = if (lastPlayedMs > 0) sdf.format(java.util.Date(lastPlayedMs)) else "从未播放"
+                    val lastModifiedStr = if (file.exists()) sdf.format(java.util.Date(file.lastModified())) else context.getString(R.string.unknown_value)
+                    val lastPlayedStr = if (lastPlayedMs > 0) sdf.format(java.util.Date(lastPlayedMs)) else context.getString(R.string.never_played)
 
                     // 安全提取文件后缀名 (比如 flac, wav, mp3)
                     val extName = if (isAudioVivid) "FLAC-AV3A" else file.extension.uppercase()
 
-                    // 4. 构造专业的高级详情文本
+                    // 4. 构造详情文本（标签走本地化资源，支持中英文）
+                    val channelLabel = if (spec!!.isSpatial) context.getString(R.string.detail_channels_spatial) else context.getString(R.string.detail_channels_stereo)
                     detailedInfo = """
-                🎵 基础信息 (Basic Info)
-                歌名：$title
-                歌手：$artist
-                专辑：$albumStr
-                流派：$genreStr
-                年份：$yearStr
+                🎵 ${context.getString(R.string.detail_section_basic)}
+                ${context.getString(R.string.detail_title)}：$title
+                ${context.getString(R.string.detail_artist)}：$artist
+                ${context.getString(R.string.detail_album)}：$albumStr
+                ${context.getString(R.string.detail_genre)}：$genreStr
+                ${context.getString(R.string.detail_year)}：$yearStr
 
-                📊 音频规格 (Audio Specs)
-                音质：${spec!!.level.label} ($extName)
-                采样率：${dbSampleRate / 1000.0} kHz
-                位深度：$dbBits bit
-                声道：$ch ${if (spec!!.isSpatial) "(Spatial)" else "(Stereo)"}
-                码率：${br / 1000} kbps
-                动态增益：${if (dbGain != 0f) String.format("%.2f dB", dbGain) else "未检测到 (0.00 dB)"}
+                📊 ${context.getString(R.string.detail_section_audio_specs)}
+                ${context.getString(R.string.detail_quality)}：${spec!!.level.label} ($extName)
+                ${context.getString(R.string.detail_sample_rate)}：${dbSampleRate / 1000.0} kHz
+                ${context.getString(R.string.detail_bit_depth)}：$dbBits bit
+                ${context.getString(R.string.detail_channels)}：$ch ($channelLabel)
+                ${context.getString(R.string.detail_bitrate)}：${br / 1000} kbps
+                ${context.getString(R.string.detail_gain)}：${if (dbGain != 0f) String.format("%.2f dB", dbGain) else context.getString(R.string.gain_not_detected)}
 
-                📁 文件与足迹 (File & Stats)
-                大小：$sizeStr
-                时长：${formatTime(durationMs)}
-                累计播放：$playCount 次
-                最近播放：$lastPlayedStr
-                修改时间：$lastModifiedStr
+                📁 ${context.getString(R.string.detail_section_file_stats)}
+                ${context.getString(R.string.detail_size)}：$sizeStr
+                ${context.getString(R.string.detail_duration)}：${formatTime(durationMs)}
+                ${context.getString(R.string.detail_play_count)}：$playCount ${context.getString(R.string.detail_play_count_unit)}
+                ${context.getString(R.string.detail_last_played)}：$lastPlayedStr
+                ${context.getString(R.string.detail_last_modified)}：$lastModifiedStr
                 
-                路径：$audioPath
+                ${context.getString(R.string.detail_path)}：$audioPath
             """.trimIndent()
-
-                    r.release()
                 } catch (e: Exception) {
-                    android.util.Log.e("Player", "解析详情失败: ${e.message}")
+                    android.util.Log.e("Player", context.getString(R.string.parse_detail_failed, e.message))
+                } finally {
+                    r.release()
                 }
             }
         }
@@ -579,18 +592,11 @@ fun FullScreenPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = {
-                        mediaController?.let { controller ->
-                            // 获取当前是第几首
-                            val currentIdx = controller.currentMediaItemIndex
-                            // 如果不是第一首，就强制切到前一首的 0 秒位置
-                            if (currentIdx > 0) {
-                                controller.seekTo(currentIdx - 1, 0L)
-                                controller.play()
-                            } else {
-                                // 如果是第一首，就只是回到开头
-                                controller.seekTo(0, 0L)
-                            }
-                        }
+                        // 注意：不要用 currentMediaItemIndex - 1 手动回退！
+                        // 那是“原始列表顺序”的上一格，开启随机播放(shuffle)后
+                        // 跟真正播放过的上一首完全不是一回事，体验上就像是又跳到了下一首。
+                        // seekToPrevious() 会正确尊重 shuffle 顺序（以及三秒内回到本曲开头的标准行为）。
+                        mediaController?.seekToPrevious()
                     }) {
                         Icon(
                             Icons.Filled.SkipPrevious,
@@ -654,7 +660,7 @@ fun FullScreenPlayer(
                         onSpeedSelected = { speed ->
                             if (isBitPerfectActive) {
                                 // 像 EQ 按钮一样弹出 Toast 警告 ⛔
-                                Toast.makeText(context, "Bit-perfect 已开启，硬件直通状态下无法修改倍速哦", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.bitperfect_speed_locked), Toast.LENGTH_SHORT).show()
                             } else {
                                 playbackSpeed = speed
                                 mediaController?.playbackParameters = PlaybackParameters(speed, speed)
@@ -662,53 +668,53 @@ fun FullScreenPlayer(
                         }
                     )
                 }
-                    PlayerToolChip(
-                        label = abLabel,
-                        selected = abLoopEnd >= 0,
-                        onClick = {
-                            when {
-                                abLoopStart < 0 -> {
-                                    abLoopStart = currentPosition
-                                    Toast.makeText(context, "A 点已设", Toast.LENGTH_SHORT).show()
-                                }
-                                abLoopEnd < 0 -> {
-                                    if (currentPosition > abLoopStart) {
-                                        abLoopEnd = currentPosition
-                                        Toast.makeText(context, "B 点已设，循环开始", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "B 点必须在 A 点之后", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                else -> {
-                                    abLoopStart = -1L
-                                    abLoopEnd = -1L
-                                    Toast.makeText(context, "A-B 取消", Toast.LENGTH_SHORT).show()
+                PlayerToolChip(
+                    label = abLabel,
+                    selected = abLoopEnd >= 0,
+                    onClick = {
+                        when {
+                            abLoopStart < 0 -> {
+                                abLoopStart = currentPosition
+                                Toast.makeText(context, context.getString(R.string.ab_point_a_set), Toast.LENGTH_SHORT).show()
+                            }
+                            abLoopEnd < 0 -> {
+                                if (currentPosition > abLoopStart) {
+                                    abLoopEnd = currentPosition
+                                    Toast.makeText(context, context.getString(R.string.ab_point_b_set), Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, context.getString(R.string.ab_point_b_must_after_a), Toast.LENGTH_SHORT).show()
                                 }
                             }
+                            else -> {
+                                abLoopStart = -1L
+                                abLoopEnd = -1L
+                                Toast.makeText(context, context.getString(R.string.ab_cancelled), Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    )
-                    PlayerToolChip(
-                        label = if (isFavorite) "已收藏" else "收藏",
-                        selected = isFavorite,
-                        onClick = onFavoriteClick,
-                        icon = {
-                            Icon(
-                                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                    PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
+                    }
+                )
                 PlayerToolChip(
-                    label = "分享",
+                    label = if (isFavorite) stringResource(R.string.favorite_added) else stringResource(R.string.favorite_add),
+                    selected = isFavorite,
+                    onClick = onFavoriteClick,
+                    icon = {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
+                PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
+                PlayerToolChip(
+                    label = stringResource(R.string.action_share),
                     selected = false,
                     onClick = {
                         scope.launch {
                             val liveDevices = NsdHelper.discovered.value
                             if (liveDevices.isEmpty()) {
-                                Toast.makeText(context, "附近没有在线的 Auralis 设备", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.no_nearby_devices), Toast.LENGTH_SHORT).show()
                             } else {
                                 showShareToNearbySheet = true
                             }
@@ -716,22 +722,22 @@ fun FullScreenPlayer(
                     },
                     icon = { Icon(Icons.Filled.Wifi, null, modifier = Modifier.size(16.dp)) }
                 )
-                    PlayerToolChip(
-                        label = "定时",
-                        selected = sleepTimerSeconds > 0,
-                        onClick = onSleepTimerClick,
-                        icon = {
-                            Icon(
-                                Icons.Filled.NightsStay,
-                                null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                }
+                PlayerToolChip(
+                    label = stringResource(R.string.action_timer),
+                    selected = sleepTimerSeconds > 0,
+                    onClick = onSleepTimerClick,
+                    icon = {
+                        Icon(
+                            Icons.Filled.NightsStay,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
             }
+        }
 
 
         val bgModePref = remember {
@@ -872,9 +878,9 @@ fun FullScreenPlayer(
                                 modifier = Modifier.fillMaxSize()
                                     .wrapContentWidth(Alignment.CenterHorizontally)
                                     .width(volumeBarWidth).background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
-                                    CircleShape
-                                )
+                                        MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
+                                        CircleShape
+                                    )
                             )
                         }
                     }
@@ -940,14 +946,14 @@ fun FullScreenPlayer(
                             IconButton(onClick = {
                                 showLyricsSelectorDialog = true
                             }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "选择歌词", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_select_lyrics), tint = MaterialTheme.colorScheme.primary)
                             }
 
                             IconButton(onClick = {
                                 if (skipDeleteConfirm) doDeleteLyrics()
                                 else showDeleteLyricsConfirm = true
                             }) {
-                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Outlined.DeleteOutline, contentDescription = stringResource(R.string.action_delete_lyrics_cover), tint = MaterialTheme.colorScheme.primary)
                             }
                             Spacer(Modifier.width(8.dp))
 
@@ -976,23 +982,32 @@ fun FullScreenPlayer(
                             }
 
                             IconButton(onClick = { showCoverSelectorDialog = true }) {
-                                Icon(Icons.Filled.Image, "选择封面", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Filled.Image, stringResource(R.string.action_select_cover), tint = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
                                     val songs = AppDatabase.getDatabase(context).songDao().getAllSongs().first()
                                     withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, "开始批量刷新网络封面…", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshing_covers_start), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                     val count = CoverArtCache.refreshAllOnlineCovers(context, songs)
                                     withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, "已刷新 $count 首无内嵌封面的歌曲", android.widget.Toast.LENGTH_LONG).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshed_covers_count, count), android.widget.Toast.LENGTH_LONG).show()
                                     }
                                 }
                             }) {
-                                Icon(Icons.Filled.Sync, "刷新全部网络封面", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Filled.Sync, stringResource(R.string.action_refresh_all_covers), tint = MaterialTheme.colorScheme.primary)
                             }
-                            Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = {
+                                val shareText = context.getString(R.string.share_song_text, title, artist)
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, shareText)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, context.getString(R.string.action_share_song)))
+                            }) {
+                                Icon(Icons.Filled.Share, stringResource(R.string.action_share_song), tint = MaterialTheme.colorScheme.primary)
+                            }
                             IconButton(onClick = {
                                 showInfoDialog = true
                             }) { Icon(Icons.Filled.MoreVert, "Info") }
@@ -1132,7 +1147,7 @@ fun FullScreenPlayer(
                                                     onFavoriteClick()
                                                     Toast.makeText(
                                                         context,
-                                                        "已加入红心收藏 ❤️",
+                                                        context.getString(R.string.added_to_favorites),
                                                         Toast.LENGTH_SHORT
                                                     ).show()
                                                 }
@@ -1271,34 +1286,34 @@ fun FullScreenPlayer(
                                 }; IconButton(onClick = {
                                     showLyricsSelectorDialog = true
                                 }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = "选择歌词", tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_select_lyrics), tint = MaterialTheme.colorScheme.primary)
                                 }
 
                                 IconButton(onClick = {
                                     if (skipDeleteConfirm) doDeleteLyrics()
                                     else showDeleteLyricsConfirm = true
                                 }) {
-                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除歌词与封面", tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = stringResource(R.string.action_delete_lyrics_cover), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 Spacer(Modifier.width(8.dp))
                             }
 
                             IconButton(onClick = { showCoverSelectorDialog = true }) {
-                                Icon(Icons.Filled.Image, "刷新封面", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Filled.Image, stringResource(R.string.action_refresh_cover), tint = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
                                     val songs = AppDatabase.getDatabase(context).songDao().getAllSongs().first()
                                     withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, "开始批量刷新网络封面…", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshing_covers_start), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                     val count = CoverArtCache.refreshAllOnlineCovers(context, songs)
                                     withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, "已刷新 $count 首无内嵌封面的歌曲", android.widget.Toast.LENGTH_LONG).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshed_covers_count, count), android.widget.Toast.LENGTH_LONG).show()
                                     }
                                 }
                             }) {
-                                Icon(Icons.Filled.Sync, "刷新全部网络封面", tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Filled.Sync, stringResource(R.string.action_refresh_all_covers), tint = MaterialTheme.colorScheme.primary)
                             }
 
                             // 👇 修复 2：竖屏同样提取颜色
@@ -1326,6 +1341,16 @@ fun FullScreenPlayer(
                             }
 
                             Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = {
+                                val shareText = context.getString(R.string.share_song_text, title, artist)
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, shareText)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, context.getString(R.string.action_share_song)))
+                            }) {
+                                Icon(Icons.Filled.Share, stringResource(R.string.action_share_song), tint = MaterialTheme.colorScheme.primary)
+                            }
                             IconButton(onClick = {
                                 showInfoDialog = true
                             }) { Icon(Icons.Filled.MoreVert, "Info") }
@@ -1451,7 +1476,7 @@ fun FullScreenPlayer(
                                                 onFavoriteClick()
                                                 Toast.makeText(
                                                     context,
-                                                    "已加入红心收藏 ❤️",
+                                                    context.getString(R.string.added_to_favorites),
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             }
@@ -1533,7 +1558,7 @@ fun FullScreenPlayer(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
-                    Text("歌曲详情", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.song_details_title), fontWeight = FontWeight.Bold)
                 }
             },
             text = {
@@ -1555,7 +1580,7 @@ fun FullScreenPlayer(
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
                     Spacer(Modifier.height(16.dp))
 
-                    Text("🔍 声学高频真伪鉴定 (Acoustic Quality Audit)", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.acoustic_audit_title), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(8.dp))
 
                     if (spectrogramResult == null) {
@@ -1566,14 +1591,14 @@ fun FullScreenPlayer(
                             ) {
                                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(12.dp))
-                                Text("正在解码PCM并计算FFT频谱图...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.decoding_pcm_fft), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         } else {
                             Button(
                                 onClick = {
                                     isDetectingSpectrogram = true
                                     scope.launch {
-                                        val res = SpectrogramGenerator.generate(audioPath)
+                                        val res = SpectrogramGenerator.generate(audioPath, context)
                                         spectrogramResult = res
                                         isDetectingSpectrogram = false
                                     }
@@ -1583,7 +1608,7 @@ fun FullScreenPlayer(
                             ) {
                                 Icon(Icons.Default.Search, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("进行声学真伪鉴定 (Spek)")
+                                Text(stringResource(R.string.action_run_acoustic_audit))
                             }
                         }
                     } else {
@@ -1622,8 +1647,12 @@ fun FullScreenPlayer(
                             Spacer(Modifier.height(12.dp))
 
                             // High-res Spek-style color map bitmap visualizer
+                            // 之前这里的写法是拿位图高度硬套 22.05kHz 的比例算 Nyquist，
+                            // 遇到 48kHz / 96kHz 的曲子换算出来的值就是错的，
+                            // 现在直接用真实采样率算，下面的坐标轴标签也一并改成跟着它动态变化。
+                            val axisNyquistKhz = res.sampleRate / 2000.0f
                             Text(
-                                text = "频谱频率上限：${String.format("%.1f", res.cutoffHz / 1000.0f)} kHz (Nyquist: ${String.format("%.1f", res.bitmap.height / 1024.0 * 22.05)} kHz)",
+                                text = stringResource(R.string.spectrogram_cutoff_label, String.format("%.1f", res.cutoffHz / 1000.0f), String.format("%.1f", axisNyquistKhz)),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1649,15 +1678,15 @@ fun FullScreenPlayer(
                                     verticalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("22 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Text("${String.format("%.0f", axisNyquistKhz)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
                                         Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
                                     }
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("16 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Text("${String.format("%.0f", axisNyquistKhz * 2 / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
                                         Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
                                     }
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("8 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                        Text("${String.format("%.0f", axisNyquistKhz / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
                                         Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
                                     }
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1668,25 +1697,26 @@ fun FullScreenPlayer(
                             }
 
                             Spacer(Modifier.height(8.dp))
-                            Text("※ 声学特征由 Auralis On-Demand Spectrogram 自动解码分析得出，由于静音片段或经典曲目特征可能有微弱误差，检测结果仅供参考。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                            Text(stringResource(R.string.spectrogram_disclaimer), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                         }
                     }
                 }
             },
             confirmButton = {
-                FilledTonalButton(onClick = { showInfoDialog = false }) { Text("关闭") }
+                FilledTonalButton(onClick = { showInfoDialog = false }) { Text(stringResource(R.string.action_close)) }
             }
         )
         if (showEqDialog) EqDialog(onDismiss = { showEqDialog = false })
         if (showShareToNearbySheet) {
-            val currentSong = remember(audioPath) {
-                kotlinx.coroutines.runBlocking {
+            var currentSong by remember(audioPath) { mutableStateOf<Song?>(null) }
+            LaunchedEffect(audioPath) {
+                currentSong = withContext(Dispatchers.IO) {
                     AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
                 }
             }
             if (currentSong != null) {
                 NearbyShareQuickSheet(
-                    song = currentSong,
+                    song = currentSong!!,
                     onDismiss = { showShareToNearbySheet = false }
                 )
             }
@@ -1697,10 +1727,10 @@ fun FullScreenPlayer(
             var dontAskAgain by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = { showDeleteLyricsConfirm = false },
-                title = { Text("删除歌词与封面缓存？") },
+                title = { Text(stringResource(R.string.confirm_delete_lyrics_cache_title)) },
                 text = {
                     Column {
-                        Text("此操作会把当前歌词加入黑名单，刷新时将跳过这条结果并尝试获取其他来源。")
+                        Text(stringResource(R.string.confirm_delete_lyrics_cache_body))
                         Spacer(Modifier.height(10.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1708,7 +1738,7 @@ fun FullScreenPlayer(
                         ) {
                             Checkbox(checked = dontAskAgain, onCheckedChange = { dontAskAgain = it })
                             Spacer(Modifier.width(4.dp))
-                            Text("不再弹出确认", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.dont_show_again), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 },
@@ -1723,11 +1753,11 @@ fun FullScreenPlayer(
                     }) {
                         Icon(Icons.Default.Check, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("确认删除")
+                        Text(stringResource(R.string.action_confirm_delete))
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteLyricsConfirm = false }) { Text("取消") }
+                    TextButton(onClick = { showDeleteLyricsConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
         }
@@ -1743,13 +1773,13 @@ fun FullScreenPlayer(
                     val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
                     val safeTitle = dbSong?.title ?: title
                     val safeArtist = dbSong?.artist ?: artist
-                    lyricsSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != "未知歌手") "$safeArtist $safeTitle" else safeTitle
+                    lyricsSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != context.getString(R.string.unknown_artist)) "$safeArtist $safeTitle" else safeTitle
 
                     isSearchingLyrics = true
                     scope.launch(Dispatchers.IO) {
                         val keyword = lyricsSearchKeyword
                         val jobs = listOf(
-                            async { runCatching { NeteaseLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                            async { runCatching { NeteaseLyricsFetcher.searchCandidates(context, keyword, 0) }.getOrDefault(emptyList()) },
                             async { runCatching { QQMusicLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
                             async { runCatching { KuGouLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
                             async { runCatching { LrcLibLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) }
@@ -1776,7 +1806,7 @@ fun FullScreenPlayer(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Refresh, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
-                        Text("多源歌词精准选择", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.lyrics_multi_source_title), fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
@@ -1785,7 +1815,7 @@ fun FullScreenPlayer(
                         OutlinedTextField(
                             value = lyricsSearchKeyword,
                             onValueChange = { lyricsSearchKeyword = it },
-                            label = { Text("搜索关键词") },
+                            label = { Text(stringResource(R.string.search_keyword_label)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             trailingIcon = {
@@ -1795,7 +1825,7 @@ fun FullScreenPlayer(
                                         scope.launch(Dispatchers.IO) {
                                             val keyword = lyricsSearchKeyword
                                             val jobs = listOf(
-                                                async { runCatching { NeteaseLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
+                                                async { runCatching { NeteaseLyricsFetcher.searchCandidates(context, keyword, 0) }.getOrDefault(emptyList()) },
                                                 async { runCatching { QQMusicLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
                                                 async { runCatching { KuGouLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) },
                                                 async { runCatching { LrcLibLyricsFetcher.searchCandidates(keyword, 0) }.getOrDefault(emptyList()) }
@@ -1814,7 +1844,7 @@ fun FullScreenPlayer(
                                         }
                                     }
                                 ) {
-                                    Icon(Icons.Default.Search, contentDescription = "搜索")
+                                    Icon(Icons.Default.Search, contentDescription = stringResource(R.string.action_search))
                                 }
                             },
                             shape = RoundedCornerShape(12.dp)
@@ -1832,7 +1862,7 @@ fun FullScreenPlayer(
                             ) {
                                 CircularProgressIndicator()
                                 Spacer(Modifier.height(12.dp))
-                                Text("正在并发抓取多平台歌词...", style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.fetching_multi_platform_lyrics), style = MaterialTheme.typography.bodyMedium)
                             }
                         } else {
                             val allPlatforms = listOf("网易云", "QQ音乐", "酷狗", "LrcLib")
@@ -1846,7 +1876,7 @@ fun FullScreenPlayer(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text("未找到任何匹配的歌词，请更换关键词搜索", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(R.string.no_matching_lyrics_found), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             } else {
                                 Box(
@@ -1862,7 +1892,7 @@ fun FullScreenPlayer(
                                             .take(3)
 
                                         if (recommended.isNotEmpty()) {
-                                            Text("✨ 智能综合推荐", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                            Text(stringResource(R.string.smart_recommendation), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                             Spacer(Modifier.height(8.dp))
                                             recommended.forEach { candidate ->
                                                 LyricCandidateRow(
@@ -1872,7 +1902,7 @@ fun FullScreenPlayer(
                                                         applyingCandidateId = "${candidate.platform}_${candidate.id}"
                                                         scope.launch(Dispatchers.IO) {
                                                             val raw = when (candidate.platform) {
-                                                                "网易云" -> NeteaseLyricsFetcher.fetchLyric(candidate.id)
+                                                                "网易云" -> NeteaseLyricsFetcher.fetchLyric(context, candidate.id)
                                                                 "QQ音乐" -> QQMusicLyricsFetcher.fetchLyric(candidate.id)
                                                                 "酷狗" -> KuGouLyricsFetcher.fetchLyric(candidate.id)
                                                                 "LrcLib" -> if (candidate.previewLrc.isNotEmpty()) candidate.previewLrc else LrcLibLyricsFetcher.fetchLyric(candidate.id)
@@ -1894,12 +1924,12 @@ fun FullScreenPlayer(
                                                                     lyricsSource = src
                                                                     showLyricsSelectorDialog = false
                                                                     applyingCandidateId = null
-                                                                    android.widget.Toast.makeText(context, "歌词成功应用自 [${candidate.platform}]！", android.widget.Toast.LENGTH_SHORT).show()
+                                                                    android.widget.Toast.makeText(context, context.getString(R.string.lyrics_applied_from, candidate.platform), android.widget.Toast.LENGTH_SHORT).show()
                                                                 }
                                                             } else {
                                                                 withContext(Dispatchers.Main) {
                                                                     applyingCandidateId = null
-                                                                    android.widget.Toast.makeText(context, "歌词获取失败，请尝试其他选项", android.widget.Toast.LENGTH_SHORT).show()
+                                                                    android.widget.Toast.makeText(context, context.getString(R.string.lyrics_fetch_failed), android.widget.Toast.LENGTH_SHORT).show()
                                                                 }
                                                             }
                                                         }
@@ -1931,7 +1961,7 @@ fun FullScreenPlayer(
                                                     )
                                                     if (candidates.size > 3) {
                                                         TextButton(onClick = { expandedPlatforms[platform] = !isExpanded }) {
-                                                            Text(if (isExpanded) "收起" else "展开更多")
+                                                            Text(if (isExpanded) stringResource(R.string.action_collapse) else stringResource(R.string.action_expand_more))
                                                         }
                                                     }
                                                 }
@@ -1944,7 +1974,7 @@ fun FullScreenPlayer(
                                                             applyingCandidateId = "${candidate.platform}_${candidate.id}"
                                                             scope.launch(Dispatchers.IO) {
                                                                 val raw = when (candidate.platform) {
-                                                                    "网易云" -> NeteaseLyricsFetcher.fetchLyric(candidate.id)
+                                                                    "网易云" -> NeteaseLyricsFetcher.fetchLyric(context, candidate.id)
                                                                     "QQ音乐" -> QQMusicLyricsFetcher.fetchLyric(candidate.id)
                                                                     "酷狗" -> KuGouLyricsFetcher.fetchLyric(candidate.id)
                                                                     "LrcLib" -> if (candidate.previewLrc.isNotEmpty()) candidate.previewLrc else LrcLibLyricsFetcher.fetchLyric(candidate.id)
@@ -1966,12 +1996,12 @@ fun FullScreenPlayer(
                                                                         lyricsSource = src
                                                                         showLyricsSelectorDialog = false
                                                                         applyingCandidateId = null
-                                                                        android.widget.Toast.makeText(context, "歌词成功应用自 [${candidate.platform}]！", android.widget.Toast.LENGTH_SHORT).show()
+                                                                        android.widget.Toast.makeText(context, context.getString(R.string.lyrics_applied_from, candidate.platform), android.widget.Toast.LENGTH_SHORT).show()
                                                                     }
                                                                 } else {
                                                                     withContext(Dispatchers.Main) {
                                                                         applyingCandidateId = null
-                                                                        android.widget.Toast.makeText(context, "歌词获取失败，请尝试其他选项", android.widget.Toast.LENGTH_SHORT).show()
+                                                                        android.widget.Toast.makeText(context, context.getString(R.string.lyrics_fetch_failed), android.widget.Toast.LENGTH_SHORT).show()
                                                                     }
                                                                 }
                                                             }
@@ -1989,7 +2019,7 @@ fun FullScreenPlayer(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showLyricsSelectorDialog = false }) { Text("关闭") }
+                    TextButton(onClick = { showLyricsSelectorDialog = false }) { Text(stringResource(R.string.action_close)) }
                 }
             )
         }
@@ -2001,10 +2031,10 @@ fun FullScreenPlayer(
                     val dbSong = AppDatabase.getDatabase(context).songDao().getSongByPath(audioPath)
                     val safeTitle = dbSong?.title ?: title
                     val safeArtist = dbSong?.artist ?: artist
-                    coverSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != "未知歌手") "$safeArtist $safeTitle" else safeTitle
+                    coverSearchKeyword = if (safeArtist.isNotEmpty() && safeArtist != context.getString(R.string.unknown_artist)) "$safeArtist $safeTitle" else safeTitle
                     isSearchingCovers = true
                     scope.launch(Dispatchers.IO) {
-                        coverCandidates = CoverFetcher.searchCoverCandidates(safeTitle, safeArtist)
+                        coverCandidates = CoverFetcher.searchCoverCandidates(context, safeTitle, safeArtist)
                         withContext(Dispatchers.Main) { isSearchingCovers = false }
                     }
                 }
@@ -2017,7 +2047,7 @@ fun FullScreenPlayer(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Image, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
-                        Text("选择封面", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.action_select_cover), fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
@@ -2025,7 +2055,7 @@ fun FullScreenPlayer(
                         OutlinedTextField(
                             value = coverSearchKeyword,
                             onValueChange = { coverSearchKeyword = it },
-                            label = { Text("搜索关键词") },
+                            label = { Text(stringResource(R.string.search_keyword_label)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             trailingIcon = {
@@ -2035,10 +2065,10 @@ fun FullScreenPlayer(
                                         val parts = coverSearchKeyword.split(" ", limit = 2)
                                         val t = parts.last()
                                         val a = if (parts.size > 1) parts.first() else ""
-                                        coverCandidates = CoverFetcher.searchCoverCandidates(t, a)
+                                        coverCandidates = CoverFetcher.searchCoverCandidates(context, t, a)
                                         withContext(Dispatchers.Main) { isSearchingCovers = false }
                                     }
-                                }) { Icon(Icons.Default.Search, contentDescription = "搜索") }
+                                }) { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.action_search)) }
                             },
                             shape = RoundedCornerShape(12.dp)
                         )
@@ -2047,12 +2077,12 @@ fun FullScreenPlayer(
                             Column(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                 CircularProgressIndicator()
                                 Spacer(Modifier.height(12.dp))
-                                Text("正在并发抓取多平台封面...", style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.fetching_multi_platform_covers), style = MaterialTheme.typography.bodyMedium)
                             }
                         } else {
                             if (coverCandidates.isEmpty()) {
                                 Column(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                    Text("未找到任何封面", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(R.string.no_covers_found), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             } else {
                                 Box(modifier = Modifier.weight(1f, fill = false).heightIn(max = 400.dp)) {
@@ -2099,7 +2129,7 @@ fun FullScreenPlayer(
                                                                     }
                                                                 }
 
-                                                                android.widget.Toast.makeText(context, "封面已顺滑实时应用！❤️", android.widget.Toast.LENGTH_SHORT).show()
+                                                                android.widget.Toast.makeText(context, context.getString(R.string.cover_applied_smoothly), android.widget.Toast.LENGTH_SHORT).show()
                                                                 showCoverSelectorDialog = false
                                                             }
                                                         }
@@ -2138,7 +2168,7 @@ fun FullScreenPlayer(
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showCoverSelectorDialog = false }) { Text("关闭") }
+                    TextButton(onClick = { showCoverSelectorDialog = false }) { Text(stringResource(R.string.action_close)) }
                 }
             )
         }
@@ -2212,49 +2242,49 @@ fun FullScreenPlayer(
                                         alpha = if (isBeingDragged) 0.92f else 1f
                                     }
                                     .pointerInput(item?.mediaId) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = {
-                                            draggedItemIndex = index; dragOffsetY = 0f
-                                        },
-                                        onDragEnd = {
-                                            val from = draggedItemIndex;
-                                            val offset = dragOffsetY; draggedItemIndex =
-                                            null; dragOffsetY = 0f; if (from != null) {
-                                            val to =
-                                                (from + (offset / itemHeightPx).roundToInt()).coerceIn(
-                                                    0,
-                                                    count - 1
-                                                ); if (from != to) {
-                                                val movedItem =
-                                                    currentList.removeAt(from); currentList.add(
-                                                    to,
-                                                    movedItem
-                                                ); mediaController?.moveMediaItem(from, to)
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = {
+                                                draggedItemIndex = index; dragOffsetY = 0f
+                                            },
+                                            onDragEnd = {
+                                                val from = draggedItemIndex;
+                                                val offset = dragOffsetY; draggedItemIndex =
+                                                null; dragOffsetY = 0f; if (from != null) {
+                                                val to =
+                                                    (from + (offset / itemHeightPx).roundToInt()).coerceIn(
+                                                        0,
+                                                        count - 1
+                                                    ); if (from != to) {
+                                                    val movedItem =
+                                                        currentList.removeAt(from); currentList.add(
+                                                        to,
+                                                        movedItem
+                                                    ); mediaController?.moveMediaItem(from, to)
+                                                }
                                             }
-                                        }
-                                        },
-                                        onDragCancel = {
-                                            draggedItemIndex = null; dragOffsetY = 0f
-                                        },
-                                        onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
-                                }.clickable {
-                                    val realIdx =
-                                        (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
-                                    mediaController?.seekTo(realIdx, 0L); mediaController?.play()
-                                }; showPlaylistSheet = false
-                                },
+                                            },
+                                            onDragCancel = {
+                                                draggedItemIndex = null; dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
+                                    }.clickable {
+                                        val realIdx =
+                                            (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
+                                        mediaController?.seekTo(realIdx, 0L); mediaController?.play()
+                                    }; showPlaylistSheet = false
+                                    },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 PlaylistQueueRow(
                                     index = index + 1,
-                                    title = item?.mediaMetadata?.title?.toString() ?: "未知",
+                                    title = item?.mediaMetadata?.title?.toString() ?: stringResource(R.string.unknown_value),
                                     artist = item?.mediaMetadata?.artist?.toString(),
                                     isPlaying = isCurrentPlaying,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Icon(
                                     Icons.Filled.DragHandle,
-                                    "拖动排序",
+                                    stringResource(R.string.action_drag_to_reorder),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f),
                                     modifier = Modifier.padding(start = 4.dp)
                                 )
@@ -2423,7 +2453,7 @@ fun LyricCandidateRow(
                     val mins = candidate.durationSec / 60
                     val secs = candidate.durationSec % 60
                     Text(
-                        text = "时长: $mins:${String.format(Locale.getDefault(), "%02d", secs)}",
+                        text = stringResource(R.string.duration_label, mins, String.format(Locale.getDefault(), "%02d", secs)),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
@@ -2435,7 +2465,7 @@ fun LyricCandidateRow(
             } else {
                 Icon(
                     imageVector = Icons.Filled.Check,
-                    contentDescription = "选择并应用",
+                    contentDescription = stringResource(R.string.action_select_and_apply),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                 )
             }

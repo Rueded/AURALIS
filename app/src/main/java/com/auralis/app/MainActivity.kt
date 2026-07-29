@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
@@ -39,9 +40,33 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 
+/**
+ * 专门用来传递 Activity 引用的 CompositionLocal。
+ * 之所以不能直接用 LocalContext.current as MainActivity，是因为 LocalizedContent
+ * 会把 LocalContext 替换成 createConfigurationContext 生成的普通 ContextImpl，
+ * 那个 Context 跟 MainActivity 没有继承关系，强转会崩溃（ClassCastException）。
+ * LocalActivity 在 LocalizedContent 外层提供，不会被语言切换影响。
+ */
+val LocalActivity = staticCompositionLocalOf<MainActivity> {
+    error("LocalActivity 没有被提供，请确认调用栈在 CompositionLocalProvider(LocalActivity provides ...) 内部")
+}
+@androidx.media3.common.util.UnstableApi
 class MainActivity : ComponentActivity() {
     val audioPermissionGranted = mutableStateOf(false)
+
+    // 之前的做法（只在 Compose 树里用 CompositionLocalProvider 包一层 LocalContext）
+    // 对普通 Text/Button 有效，但 AlertDialog/Dialog 这些另开 Window 的控件拿 Context
+    // 有些路径不走 LocalContext.current，导致弹窗一直显示系统默认语言。
+    // 这里在 attachBaseContext 阶段就把 Context 换成正确语言的版本，
+    // 这样整个 Activity（包括它开出来的所有 Window）从创建的那一刻起就是对的语言，
+    // 不存在“某些控件绕过了包装”的问题。
+    override fun attachBaseContext(newBase: Context) {
+        val lang = LocalizationManager.readSavedLanguage(newBase)
+        super.attachBaseContext(LocalizationManager.wrapContext(newBase, lang))
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -51,8 +76,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         audioPermissionGranted.value = hasPermission()
+
+        // 多语言：App 一启动就把上次选的语言读出来
+        LocalizationManager.init(this)
 
         // 🚨 关键：如果是从通知点击进来的，要能识别到
         val shouldOpenPlayer = mutableStateOf(false)
@@ -61,9 +89,13 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            AuralisTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
+            CompositionLocalProvider(LocalActivity provides this) {
+                LocalizedContent {
+                    AuralisTheme {
+                        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                            MusicAppScreen(shouldOpenPlayer = shouldOpenPlayer)
+                        }
+                    }
                 }
             }
         }
@@ -104,6 +136,7 @@ class MainActivity : ComponentActivity() {
 // ==========================================
 // 均衡器对话框
 // ==========================================
+@androidx.media3.common.util.UnstableApi
 @Composable
 fun EqDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -116,9 +149,9 @@ fun EqDialog(onDismiss: () -> Unit) {
 
     if (isBitPerfect) {
         AlertDialog(
-            onDismissRequest = onDismiss, title = { Text("均衡器已旁路") },
-            text = { Text("当前已开启 USB 源码直通，音频信号直接发送至 DAC，系统 EQ 无法介入。") },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("了解") } }
+            onDismissRequest = onDismiss, title = { Text(stringResource(R.string.equalizer_bypassed_title)) },
+            text = { Text(stringResource(R.string.equalizer_bypassed_body)) },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_understood)) } }
         )
         return
     }
@@ -129,20 +162,20 @@ fun EqDialog(onDismiss: () -> Unit) {
             if (PlaybackService.audioSessionId != 0) {
                 Equalizer(0, PlaybackService.audioSessionId).also { it.enabled = true }
             } else {
-                eqErrorMessage = "AudioSessionId 尚未准备好，请先播放任意一首歌曲后再打开 EQ。"
+                eqErrorMessage = context.getString(R.string.audio_session_not_ready)
                 null
             }
         } catch (e: Exception) {
-            eqErrorMessage = "当前手机系统拒绝了全局均衡器请求：${e.message}"
+            eqErrorMessage = context.getString(R.string.equalizer_request_rejected, e.message)
             null
         }
     }
 
     if (eq == null) {
         AlertDialog(
-            onDismissRequest = onDismiss, title = { Text("均衡器不可用") },
-            text = { Text(eqErrorMessage ?: "未知错误") },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+            onDismissRequest = onDismiss, title = { Text(stringResource(R.string.equalizer_unavailable_title)) },
+            text = { Text(eqErrorMessage ?: stringResource(R.string.unknown_error)) },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } }
         )
         return
     }
@@ -162,9 +195,9 @@ fun EqDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("发烧级均衡器", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.audiophile_equalizer_title), fontWeight = FontWeight.Bold)
                 IconButton(onClick = { showSaveNameDialog = true }) {
-                    Icon(Icons.Default.Save, "保存预设", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Save, stringResource(R.string.action_save_preset), tint = MaterialTheme.colorScheme.primary)
                 }
             }
         },
@@ -172,7 +205,7 @@ fun EqDialog(onDismiss: () -> Unit) {
             Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 // 👇 自定义预设区域
                 if (customPresets.isNotEmpty()) {
-                    Text("我的预设", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.my_presets_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(customPresets) { preset ->
@@ -204,7 +237,7 @@ fun EqDialog(onDismiss: () -> Unit) {
                 }
 
                 if (presetNames.isNotEmpty()) {
-                    Text("系统方案", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text(stringResource(R.string.system_presets_label), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(presetNames) { idx, name ->
@@ -250,19 +283,19 @@ fun EqDialog(onDismiss: () -> Unit) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-        dismissButton = { TextButton(onClick = { repeat(numBands) { i -> eq.setBandLevel(i.toShort(), 0); bandLevels[i] = 0 } }) { Text("重置") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_done)) } },
+        dismissButton = { TextButton(onClick = { repeat(numBands) { i -> eq.setBandLevel(i.toShort(), 0); bandLevels[i] = 0 } }) { Text(stringResource(R.string.action_reset)) } }
     )
 
     if (showSaveNameDialog) {
         AlertDialog(
             onDismissRequest = { showSaveNameDialog = false },
-            title = { Text("保存预设") },
+            title = { Text(stringResource(R.string.action_save_preset)) },
             text = {
                 OutlinedTextField(
                     value = saveNameText,
                     onValueChange = { saveNameText = it },
-                    label = { Text("预设名称") },
+                    label = { Text(stringResource(R.string.preset_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -277,9 +310,9 @@ fun EqDialog(onDismiss: () -> Unit) {
                             saveNameText = ""
                         }
                     }
-                }) { Text("保存") }
+                }) { Text(stringResource(R.string.action_save)) }
             },
-            dismissButton = { TextButton(onClick = { showSaveNameDialog = false }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { showSaveNameDialog = false }) { Text(stringResource(R.string.action_cancel)) } }
         )
     }
 }

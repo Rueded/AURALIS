@@ -1,127 +1,168 @@
-
 <div align="center">
   <h1>🌌 A U R A L I S 音澜</h1>
-  <p><b>发烧级本地高保真无损音乐播放器 · 基于 Kotlin & Jetpack Compose</b></p>
-  <p>彻底接管“解码”到“输出”全链路，释放本地无损音乐最真实的生命力</p>
+  <p><b>基于 Kotlin & Jetpack Compose 的本地无损音乐播放器</b></p>
+  <p>专注于准确的音频信息展示与稳定的本地播放体验</p>
 
 [![Platform](https://img.shields.io/badge/Platform-Android_8.0+-3DDC84?style=flat-square&logo=android)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9+-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/UI-Jetpack_Compose-4285F4?style=flat-square&logo=android)](https://developer.android.com/jetpack/compose)
 [![Media3](https://img.shields.io/badge/Kernel-Media3_ExoPlayer-FF0000?style=flat-square&logo=google)](https://developer.android.com/media/media3)
 [![License](https://img.shields.io/badge/License-GPLv3-blue?style=flat-square)](LICENSE)
+
+**[中文](#中文说明) · [English](#english)**
 </div>
 
 ---
 
-## 💡 项目愿景
+# 中文说明
 
-**AURALIS 音澜** 的使命是打破 Android 底层音频接口的传统妥协。针对原生系统元数据高频错报、AudioFlinger 强制混音 SRC 劣化的通病，项目从零构建了自适应源码直通引擎与双层防抖缓存架构。不仅在技术层面上攻克了高频切歌下的时序竞争乱象，更在视觉层面上将声明式流体美学与硬核发烧工作台完美结合。
+## 项目简介
 
----
+AURALIS 是一款基于 Media3 ExoPlayer 内核的本地音乐播放器，主要解决两个问题：Android 系统 API 在读取音频元数据（采样率、位深）时经常报不准，以及切歌频繁时网络请求（封面/歌词）容易产生竞态和脏数据。项目在这两点上做了针对性的工程处理，同时提供均衡器、歌词、封面主题色、频谱分析等常规播放器功能。
 
-## ✨ 核心特性 (Key Features)
+## 功能特性
 
-### 🔊 终极听觉引擎 (Audiophile Engine)
-* **🔌 全局自适应 USB 源码直通 (Dynamic Bit-Perfect Output)**
-  彻底绕过 Android 系统的 AudioFlinger 混音器。深度适配 Android 14+ 规范，实时抓取底层数据库真值（如 24bit/192kHz），并与外接 USB DAC 进行最高规格的“硬件握手”，点亮全屏金标，拒绝 SRC 劣化。
-* **🛠️ 突破系统限制的“真值”解析 (True-Bit Extraction)**
-  不再受限于系统 `MediaMetadataRetriever` 经常错报 48kHz 的通病。深度结合 `MediaExtractor` 与底层数据库（`jaudiotagger`），精准挖掘并展现真实的母带级采样率与位深。
-* **⚡ 全新 Media3 驱动与 Offload 硬件卸载**
-  全面拥抱新一代播放内核。完美支持高码率 FLAC/WAV/DSD 的超大内存防卡顿缓冲，并在非直通状态下智能开启 `Audio Offload`，实现丝滑的无缝播放与极致省电。
+### 播放内核
+- 基于 AndroidX Media3 (ExoPlayer) 构建播放链路。
+- **USB Bit-perfect 输出**：Android 14 (API 34) 及以上系统，使用官方开放的 `AudioMixerAttributes` API，将输出采样率/位深与源文件对齐，并结合 Media3 的 `AudioOffloadPreferences` 在非直通状态下启用硬件卸载播放，以降低功耗。低于 API 34 的设备不支持该特性，会走系统默认混音路径。
+- 支持 FLAC / WAV / DSD 等格式播放。
 
-### ☁️ 云端智能与元数据 (Cloud Intelligence)
-* **🌊 三级瀑布流智能封面引擎 (Waterfall Cloud-Meta)**
-  无惧残缺的本地元数据。优先获取 Apple Music (iTunes) API 的 `800x800` 顶级无损原图，网易云音乐 API 无缝兜底，自研极光流体算法渲染终极防线。
-* **🎤 全网双擎滚动歌词 (Dual-Engine Synced Lyrics)**
-  网易云 API 优先，酷狗音乐无缝降级。在线抓取后强制压缩为 `.webp` 与 `.lrc` 永久持久化至本地缓存，一次联网，终身离线秒开。
+### 准确的音频信息
+- 系统自带的 `MediaMetadataRetriever` 在部分机型上会把高采样率文件误报为 48kHz。项目额外引入 `jaudiotagger` 在扫描阶段解析真实的采样率、位深，并写入本地数据库，播放时优先读取这份数据，而不是临时用系统 API 现读。
+- 详情面板展示：格式、采样率、位深、声道数（含空间音频/AV3A 12 声道检测）、码率、ReplayGain 动态增益、文件大小、时长、播放次数、最近播放时间、修改时间、文件路径。所有标签均已接入字符串资源，支持中英文界面。
 
-### ⚡ 工业级性能架构 (Industrial Performance)
-* **🚄 双层防抖缓存引擎 (Ultra-Fast Caching)**
-  内置自研 `AudioCache` 单例。采用 `LruCache` (RAM) + 磁盘静态文件双层缓存。智能过滤系统虚构的脏图，通过 `RGB_565` 强效节省 50% 内存。即使面对上千首无损曲库，列表滚动依然绝对丝滑。
-* **🛡️ 强悍的双赛道并发防御 (Dual-Track Concurrency)**
-  在毫秒级的快速切歌中，彻底消灭时序竞争乱象（Race Condition）。采用协程作用域斩杀机制配合 `500ms` 智能防抖，彻底杜绝歌词串台、接口风控与脏数据写入。
+### 云端封面与歌词
+- **封面**：并发请求 QQ 音乐、网易云、iTunes、Deezer 四个来源，取最先返回的有效结果，不做质量分级或图像合成。
+- **歌词**：支持网易云 / QQ 音乐 / 酷狗 / LRCLIB 多个来源，可在设置中调整优先级顺序；抓取结果会压缩为本地 `.lrc` 文件缓存，避免重复请求。
 
-### 🎨 现代发烧级美学 (Aesthetic Interface)
-* **🎛️ 沉浸式发烧工作台 (Audiophile Dashboard)**
-  全面重构大圆角、毛玻璃与半透明呼吸感 (Glassmorphism) 的全屏设置与播放界面。内置 ReplayGain 动态响度平衡、专业五频段 EQ 均衡器与 A-B 循环硬核功能。
-* **🏆 发烧级音质分级与专属配色 (Audiophile Tagging)**
-  严苛的音质漏斗算法。从 DSD、DXD 到 Master、Hi-Res+。为顶级格式定制了兼顾深色/浅色模式的高对比度 UI 标签（如 DSD 的“母带深橙”，Hi-Res 的“发烧金黄”）。
-* **📊 极客级详细信息面板 (Geek-Level Info)**
-  一键查看硬核音频档案：编码格式、动态回放增益 (ReplayGain)、空间音频声道检测 (Spatial Audio/AV3A 12声道)、文件修改时间以及精准的听歌足迹记录。
+### 性能与并发处理
+- 扫描曲库时合并 IO：一次遍历中同时完成音频规格解析（`jaudiotagger` / `MediaExtractor`）与元数据入库（Room，`OnConflictStrategy.IGNORE`），减少重复磁盘读取。
+- 封面/缩略图使用 `LruCache`（内存）+ 磁盘文件的两级缓存，位图统一使用 `RGB_565` 而非默认的 `ARGB_8888`，在牺牲部分色彩精度的前提下降低约一半内存占用。
+- 快速切歌时，借助 Compose `LaunchedEffect` 的 key 机制取消上一首歌曲未完成的网络请求（封面/歌词），并配合 500ms 防抖与 `Mutex` 互斥写入，避免异步结果乱序覆盖当前歌曲的数据。
 
-### 📊 极客硬核声学分析与真假无损鉴定 (Acoustic Spectrogram & Anti-Fraud Engine)
-* **🧪 原生底层硬件解码硬核探针 (Low-Level MediaCodec Extraction)**
-  绕过所有高层 API，直接调用底层的 `MediaExtractor` 与 `MediaCodec` 原生音频硬解码器。在歌曲 1/3 的黄金时间点抽取 20 秒完整 PCM 数据流，混合双声道信号并进行物理级浮点归一化。
-* **📐 基-2 快速傅里叶变换与汉宁窗去噪 (2048-Point FFT & Hann Windowing)**
-  内置数字信号处理（DSP）算法栈。在分帧阶段强制施加汉宁窗函数，完美消除信号截断带来的频谱泄露与高频伪影；通过 2048 点高级 FFT 算法，将时域信号精准离散映射到 1024 个频段能量桶中。
-* **🛡️ 动态能量阈值反推与假无损欺诈检测 (Programmatic Anti-Fake-FLAC Audit)**
-  设定严苛的 `-65.0 dB` 活跃声学能量阈值线。利用奈奎斯特频率物理公式推导最真实的物理高频截止频率（Cutoff）。设立音质欺诈漏斗判定：全自动曝光低码率 MP3 强行扩容转 FLAC 的“假无损”行为，点亮“真无损/音质欺诈”真值标签。
-* **🎨 专业级 Spek 视觉色阶全频谱图渲染 (Spek-Style Energy Heatmap)**
-  自研热力分贝能量映射算法。将所有帧的频域能量转化映射为高对比度的发烧友专业色域（深蓝 $\rightarrow$ 紫 $\rightarrow$ 翠绿 $\rightarrow$ 闪黄 $\rightarrow$ 艳红）。渲染出像素级高保真全声谱热力图 Bitmap，让母带能量肉眼可见。
+### 均衡器
+- 基于 Android 系统的 `Equalizer` / `BassBoost` / `LoudnessEnhancer`（`android.media.audiofx`）音频效果器实现，提供五段 EQ、低音增强和响度增强，并支持 ReplayGain 动态响度平衡。这是系统级音频效果，不是自研 DSP 算法。
+- 若开启 USB 源码直通，音频将不经过系统混音器，此时均衡器无法生效，界面会提示“均衡器已旁路”。
 
----
+### 频谱与无损鉴定（实验性功能）
+- 使用 `MediaExtractor` + `MediaCodec` 硬解码，在歌曲约 1/3 时间点截取 20 秒 PCM 数据，混合双声道并做浮点归一化。
+- 对采样帧施加汉宁窗后做 2048 点 FFT，统计各频段能量，找到平均能量高于 -65dB 阈值的最高频率作为“截止频率”估计值。
+- 依据截止频率给出参考判定（如“接近奈奎斯特频率，疑似无损”或“截止频率偏低，疑似低码率转码”），并渲染频谱热力图。
+- 需要说明：这是基于经验阈值的启发式判断，用于辅助参考，**不是**权威的音频取证工具，可能受编码器、低通滤波设置等因素影响产生误判。
 
-## 🛠️ 技术栈 (Tech Stack)
+### PC 有线音频推流（局域网/USB 调试功能）
+基于 `AudioTrack`（`PERFORMANCE_MODE_LOW_LATENCY`）实现的 Socket 接收端，可以把手机当作电脑的一个有线音频输出设备：
+
+1. App「设置」→ 打开「PC 有线音箱模式」，服务会监听 `8899` 端口。
+2. 手机通过数据线连接电脑，确保已开启 USB 调试。
+3. 电脑端执行端口转发：
+   ```bash
+   adb reverse tcp:8899 tcp:8899
+   ```
+4. 电脑端的推流程序建立连接后，会以 44.1kHz / 16bit 双声道 PCM 格式通过该端口发送音频数据，手机端播放。这是一个基础的本地 Socket 传输方案，延迟表现取决于数据线连接质量和电脑端实现，并非硬件级无损声卡。
+
+## 技术栈
 
 ```mermaid
 graph TD
-    A[UI 表现层: Jetpack Compose] --> B[内核驱动层: AndroidX Media3 ExoPlayer]
-    B --> C[数据持久层: Room Database]
-    A --> D[数据并发控制: Coroutines & Flow]
-    B --> E[音频解析层: MediaExtractor / jaudiotagger]
-    D --> F[网络异步层: OkHttp3 & Gson]
-
+    A[UI 层: Jetpack Compose] --> B[播放内核: AndroidX Media3 ExoPlayer]
+    B --> C[本地持久化: Room Database]
+    A --> D[并发控制: Coroutines & Flow]
+    B --> E[音频解析: MediaExtractor / jaudiotagger]
+    D --> F[网络请求: OkHttp3 & Gson]
 ```
 
-* **UI 框架**: Jetpack Compose 100% 纯声明式构建 (Material Design 3 + Nonce 状态重绘联动)
-* **内核驱动**: AndroidX Media3 (ExoPlayer 内核)
-* **音频解析**: `MediaExtractor`, `MediaMetadataRetriever`, `jaudiotagger`
-* **异步并发**: Kotlin Coroutines & Flow (自适应切换 `Dispatchers.IO` / `Main`)
-* **本地存储**: Room Database (基于破坏性迁移策略升级多张关联表)
-* **网络请求**: OkHttp3 (15s 超时拉长防断链路) & Gson
-* **核心组件**: `SpectrogramGenerator` (硬解码傅里叶变声谱发生器)、`AutoCoverFetcher` (信号量限流封面泵)、`OnlineLyricsRepository` (指纹黑名单歌词流)
-* **信号处理 (DSP)**: 2048点快速傅里叶变换、汉宁窗时域加权、`-65dB` 声学截止频率推导算法
-* **网络请求**: OkHttp3 (Cookie 风控伪装注入、JSONP 剥离重构器)
+- **UI**：Jetpack Compose（Material Design 3），声明式构建
+- **播放内核**：AndroidX Media3 (ExoPlayer)
+- **音频解析**：`MediaExtractor`、`MediaMetadataRetriever`、`jaudiotagger`
+- **并发**：Kotlin Coroutines & Flow
+- **本地存储**：Room Database（当前使用 `fallbackToDestructiveMigration`，意味着数据库结构升级时旧数据会被清空重建，非增量迁移，升级前请注意备份）
+- **网络请求**：OkHttp3、Gson
+- **信号处理**：自实现的 2048 点 FFT、汉宁窗加权，用于频谱分析
+
+## 架构说明
+
+**曲库扫描**：传统实现容易在读取规格、缩略图、写库时产生多次磁盘 IO。AURALIS 在扫描阶段将 `jaudiotagger` 解析结果与 `MediaExtractor` 提取结果合并为一次写入，通过 `OnConflictStrategy.IGNORE` 入库。
+
+**并发安全**：切歌、快速滚动列表会触发多个封面/歌词请求。项目利用 Compose `LaunchedEffect` 的 key 联动机制，在 `audioPath` 变化时取消上一个未完成的请求协程，写入逻辑加 `Mutex` 锁，防止网络延迟回包时写入了已经不是当前播放歌曲的数据。
+
+## 已知局限
+
+- USB Bit-perfect 依赖 Android 14+ 系统 API，旧系统不支持。
+- 频谱鉴定为启发式估算，不能替代专业音频分析工具。
+- 封面/歌词接口均为第三方公开接口，非官方授权，可能因对方接口变更而失效。
+- Room 数据库使用破坏性迁移，版本升级会清空本地数据表。
+
+## 许可证
+
+本项目采用 [GNU GPLv3](https://github.com/Rueded/AURALIS/blob/master/LICENSE) 许可证开源。
 
 ---
 
-## 🚀 核心架构亮点 (Architecture Highlights)
+# English
 
-AURALIS 重点解决了传统 Android 音视频开发中长期存在的两大痛点：**底层数据源污染** 与 **高频异步读写竞争**。
+## Overview
 
-### 1. 零 IO 浪费的“单次扫描行为”
+AURALIS is a local music player built on the Media3 ExoPlayer engine. It mainly addresses two practical problems: Android's system APIs often misreport audio metadata (sample rate, bit depth), and frequent track switching can cause race conditions in network requests (cover art / lyrics) that lead to stale data being written. Beyond that, it's a fairly standard player with an equalizer, lyrics, cover-driven theming, and a spectrum analyzer.
 
-在传统架构中，读取音频规格、提取缩略图、查询本地数据库往往会导致多次磁盘 IO。AURALIS 在深度扫描过程中：
+## Features
 
-* 仅触发**一次物理 IO 操作**，利用 `jaudiotagger` 与 `MediaExtractor` 异步泵出物理位深、真实采样率与内嵌 Meta 标签。
-* 扫描数据直接通过 Room 进行冲突忽略 (`OnConflictStrategy.IGNORE`) 入库，从源头拯救系统索引被污染的“真值”。
+### Playback core
+- Built on AndroidX Media3 (ExoPlayer).
+- **USB bit-perfect output**: on Android 14 (API 34) and above, the app uses the official `AudioMixerAttributes` API to match the output sample rate/bit depth to the source file, and falls back to Media3's `AudioOffloadPreferences` for hardware offload playback (to save power) when passthrough isn't active. Devices below API 34 fall back to the standard system mixing path.
+- Supports FLAC / WAV / DSD and other lossless formats.
 
-### 2. 协程作用域斩杀机制防御时序竞争
+### Accurate audio metadata
+- `MediaMetadataRetriever` misreports high-sample-rate files as 48kHz on some devices. The app additionally uses `jaudiotagger` during library scanning to read the real sample rate and bit depth, storing them in the local database so playback reads from that rather than re-querying the system API each time.
+- The detail panel shows: format, sample rate, bit depth, channel count (including spatial audio / AV3A 12-channel detection), bitrate, ReplayGain, file size, duration, play count, last played time, modified time, and file path — all labels are localized via string resources (Chinese/English).
 
-用户高频切歌或快速滚动列表时，会瞬间并发数十个网络封面/歌词查询请求。
+### Cover art & lyrics
+- **Cover art**: fetches concurrently from QQ Music, NetEase, iTunes, and Deezer, and uses whichever valid result comes back first. No quality ranking or image compositing involved.
+- **Lyrics**: supports NetEase / QQ Music / KuGou / LRCLIB, with a configurable source priority in settings. Fetched lyrics are cached locally as `.lrc` files to avoid repeat requests.
 
-* AURALIS 充分利用了 Compose `LaunchedEffect` 的 Key 值联动机制，一旦 `audioPath` 变更，上一个未完成的独立请求赛道将被**瞬间强行 cancel 斩杀**。
-* 核心写入逻辑配备 `Mutex` 互斥锁，即使网络回流存在延迟，也严格拒绝脏数据和串台歌词写入当前物理磁盘。
+### Performance & concurrency
+- Library scanning merges audio-spec parsing (`jaudiotagger` / `MediaExtractor`) and database writes (Room, `OnConflictStrategy.IGNORE`) into a single pass to reduce redundant disk IO.
+- Covers/thumbnails use a two-tier cache: `LruCache` (memory) plus disk files, with bitmaps stored as `RGB_565` instead of the default `ARGB_8888` — roughly halves memory usage at the cost of some color precision.
+- On rapid track switching, Compose `LaunchedEffect`'s key mechanism cancels the previous track's in-flight requests (cover/lyrics), combined with a 500ms debounce and a `Mutex` around writes, to prevent out-of-order async responses from overwriting the currently playing track's data.
 
----
+### Equalizer
+- Built on Android's system `Equalizer` / `BassBoost` / `LoudnessEnhancer` (`android.media.audiofx`) audio effects — a 5-band EQ, bass boost, and loudness enhancement, plus ReplayGain-based loudness normalization. This is the standard system-level audio effects stack, not a custom DSP implementation.
+- When USB bit-perfect passthrough is active, audio bypasses the system mixer entirely, so the equalizer can't apply — the UI shows "Equalizer bypassed" in that case.
 
-## 🎹 发烧级隐藏玩法：PC 有线音箱推流模式
+### Spectrogram & lossless check (experimental)
+- Uses `MediaExtractor` + `MediaCodec` hardware decoding to extract ~20 seconds of PCM data around the 1/3 mark of a track, downmixing channels and normalizing to float.
+- Applies a Hann window and a 2048-point FFT per frame, then finds the highest frequency bin whose average energy exceeds a -65dB threshold, used as an estimated cutoff frequency.
+- Based on that cutoff, the app shows a reference verdict (e.g. "near Nyquist frequency, likely lossless" or "cutoff is low, possibly transcoded from lossy") along with a rendered spectrum heatmap.
+- Important caveat: this is a heuristic based on a fixed threshold, meant as a rough indicator — **not** an authoritative audio forensics tool. Encoder settings and low-pass filtering choices can produce false positives/negatives.
 
-AURALIS 内部集成了基于低延迟 `AudioTrack (PERFORMANCE_MODE_LOW_LATENCY)` 构建的 Socket 接收端，可将手机转化为 PC 的有线无损发烧外置声卡：
+### PC wired audio streaming (LAN/USB debugging feature)
+A socket receiver built on `AudioTrack` (`PERFORMANCE_MODE_LOW_LATENCY`) that lets the phone act as a wired audio output for a PC:
 
-1. 进入 App 「设置」 $\rightarrow$ 打开 **PC 有线音箱模式**（服务将自动探测并监听 `8899` 端口）。
-2. 将手机通过数据线连接至电脑，确保 **USB 调试** 已激活。
-3. 在电脑端控制台运行 adb 逆向端口转发命令：
-```bash
-adb reverse tcp:8899 tcp:8899
+1. In the app's Settings, enable "PC Wired Speaker Mode" — this starts a listener on port `8899`.
+2. Connect the phone to the PC via USB with USB debugging enabled.
+3. On the PC, run:
+   ```bash
+   adb reverse tcp:8899 tcp:8899
+   ```
+4. Once the PC-side streaming tool connects, it sends 44.1kHz/16-bit stereo PCM over that socket for the phone to play. This is a basic local socket transport — latency depends on the cable connection and the PC-side implementation, not a hardware-grade lossless sound card.
 
-```
+## Tech stack
 
+- **UI**: Jetpack Compose (Material Design 3), fully declarative
+- **Playback core**: AndroidX Media3 (ExoPlayer)
+- **Audio parsing**: `MediaExtractor`, `MediaMetadataRetriever`, `jaudiotagger`
+- **Concurrency**: Kotlin Coroutines & Flow
+- **Local storage**: Room Database (currently uses `fallbackToDestructiveMigration`, meaning schema upgrades wipe and recreate tables rather than migrating incrementally — back up data before upgrading)
+- **Networking**: OkHttp3, Gson
+- **Signal processing**: hand-rolled 2048-point FFT with Hann windowing, used for spectrum analysis
 
-4. 电脑端声卡推流服务开启后，音频流将通过有线链路以 44.1kHz/16bit 双声道 PCM 无损泵入手机，实现几乎零延迟的推流同步体验。
+## Known limitations
 
----
+- USB bit-perfect requires Android 14+; unsupported on older systems.
+- The lossless check is a heuristic estimate, not a substitute for proper audio analysis tools.
+- Cover art and lyrics rely on unofficial third-party public endpoints, which may break if those services change.
+- Room uses destructive migration, so a schema version bump clears local tables.
 
-## 📜 许可证 (License)
+## License
 
-本项目采用 [GNU GPLv3](https://github.com/Rueded/AURALIS/blob/master/LICENSE) 许可证开源，一切底层改动及优化必须保持开源。
+Licensed under [GNU GPLv3](https://github.com/Rueded/AURALIS/blob/master/LICENSE).

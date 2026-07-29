@@ -20,6 +20,10 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE playCount > 0 ORDER BY playCount DESC, lastPlayed DESC LIMIT 50")
     fun getMostPlayedSongs(): Flow<List<Song>>
 
+    // 👇 新增：按“最近播放时间”排序（而不是次数），用于“最近收听”视图
+    @Query("SELECT * FROM songs WHERE playCount > 0 ORDER BY lastPlayed DESC LIMIT 50")
+    fun getRecentlyPlayedSongs(): Flow<List<Song>>
+
     @Query("UPDATE songs SET isFavorite = :isFav WHERE data = :audioPath")
     suspend fun updateFavoriteStatus(audioPath: String, isFav: Boolean)
 
@@ -64,6 +68,18 @@ interface SongDao {
     LIMIT :limit
 """)
     suspend fun getTopSongsInPeriod(start: Long, end: Long, limit: Int): List<Song>
+
+    // 👇 新增：某时段内，按“最近播放时间”排序（而不是次数）
+    @Query("""
+    SELECT songs.*, MAX(play_history.timestamp) as lastTs
+    FROM play_history
+    INNER JOIN songs ON songs.data = play_history.songPath
+    WHERE play_history.timestamp >= :start AND play_history.timestamp < :end
+    GROUP BY play_history.songPath
+    ORDER BY lastTs DESC
+    LIMIT :limit
+""")
+    suspend fun getRecentSongsInPeriod(start: Long, end: Long, limit: Int): List<Song>
 
     // 获取历史记录跨越的所有年份（用于年份选择器）
     @Query("""

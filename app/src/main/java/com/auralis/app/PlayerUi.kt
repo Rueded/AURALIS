@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -26,6 +27,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * 让取色器算出来的主题色在深色背景上仍然清晰可读。
+ * 问题背景：封面主色是深蓝一类的冷色时，即便数值上"亮度"不算太低，
+ * 蓝色在人眼感知上依然比同等亮度的黄/橙色暗得多，配上纯黑背景就基本看不清了。
+ * 这里用 HSL 而不是 HSV 做判断（更贴近人眼感知的明度），
+ * 蓝紫色系（约 200°~280°）再额外提高一点亮度下限。
+ */
+fun Color.ensureReadableOnDark(minLightness: Float = 0.62f): Color {
+    val hsl = FloatArray(3)
+    androidx.core.graphics.ColorUtils.RGBToHSL(
+        (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt(), hsl
+    )
+    val hue = hsl[0]
+    val boostedMin = if (hue in 195f..280f) minLightness + 0.08f else minLightness
+    if (hsl[2] < boostedMin) {
+        hsl[2] = boostedMin
+        if (hsl[1] < 0.35f) hsl[1] = 0.35f // 亮度提上去了，饱和度太低的话顺手也提一点，避免发灰
+    }
+    return Color(androidx.core.graphics.ColorUtils.HSLToColor(hsl))
+}
 
 /** 播放器进度条：粗轨道 + 拖拽时间气泡 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,7 +127,7 @@ fun CoverLyricsSegmentedControl(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
     ) {
         Row(modifier = Modifier.padding(4.dp)) {
-            listOf(false to "封面", true to "歌词").forEach { (lyrics, label) ->
+            listOf(false to stringResource(R.string.content_desc_cover), true to stringResource(R.string.lyrics_tab_label)).forEach { (lyrics, label) ->
                 val selected = showLyrics == lyrics
                 Surface(
                     onClick = if (lyrics) onLyricsSelect else onCoverSelect,
@@ -243,7 +265,7 @@ fun ArtistChipRow(
                     ),
                     style = if (compact) MaterialTheme.typography.labelMedium
                     else MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.primary.ensureReadableOnDark(),
                     fontWeight = FontWeight.Medium,
                     maxLines = 1
                 )
@@ -309,11 +331,11 @@ fun SpeedControlChip(
 
             AlertDialog(
                 onDismissRequest = { showDialog = false },
-                title = { Text("播放倍速 (自然变调)", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.playback_speed_title), fontWeight = FontWeight.Bold) },
                 text = {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "当前倍速: ${String.format("%.2fx", tempSpeed)}",
+                            stringResource(R.string.current_speed_label, String.format("%.2fx", tempSpeed)),
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -328,20 +350,20 @@ fun SpeedControlChip(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "提示：已启用自然变速算法。减速时声音变粗，加速时声音变细，避免了强制保调带来的金属电音，以获得最佳无损音质与纯净听感。",
+                            stringResource(R.string.natural_speed_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showDialog = false }) { Text("完成") }
+                    TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.action_done)) }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         tempSpeed = 1.0f
                         onSpeedSelected(1.0f)
-                    }) { Text("重置 1.0x") }
+                    }) { Text(stringResource(R.string.action_reset_1x)) }
                 }
             )
         }
@@ -438,12 +460,12 @@ fun NoLyricsEmptyState(onImport: () -> Unit, modifier: Modifier = Modifier) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
         )
         Spacer(Modifier.height(12.dp))
-        Text("暂无歌词", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.no_lyrics_yet), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
         FilledTonalButton(onClick = onImport) {
             Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("导入 LRC")
+            Text(stringResource(R.string.action_import_lrc))
         }
     }
 }
@@ -462,15 +484,15 @@ fun PlaylistQueueHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text("播放队列", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.playback_queue_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
-                "$songCount 首",
+                stringResource(R.string.song_count_suffix, songCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         IconButton(onClick = onDismiss) {
-            Icon(Icons.Filled.KeyboardArrowDown, "关闭")
+            Icon(Icons.Filled.KeyboardArrowDown, stringResource(R.string.action_close))
         }
     }
 }

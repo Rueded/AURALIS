@@ -1,3 +1,475 @@
 <resources>
     <string name="app_name">AURALIS</string>
+
+    <!-- 首页标签页 -->
+    <string name="tab_all_songs">全部歌曲</string>
+    <string name="tab_favorites">红心收藏</string>
+    <string name="tab_recent">最近常听</string>
+    <string name="tab_albums">专辑列表</string>
+    <string name="tab_artists">歌手聚合</string>
+    <string name="tab_playlists">我的歌单</string>
+    <string name="tab_history">收听足迹</string>
+
+    <!-- 通用 -->
+    <string name="unknown_artist">未知歌手</string>
+    <string name="action_share">分享</string>
+    <string name="action_timer">定时</string>
+    <string name="action_bind">绑定</string>
+    <string name="action_send">发送</string>
+    <string name="action_unbind">解绑</string>
+    <string name="favorite_add">收藏</string>
+    <string name="favorite_added">已收藏</string>
+
+    <!-- 无障碍朗读用（迷你播放条） -->
+    <string name="content_desc_cover">封面</string>
+    <string name="content_desc_previous">上一首</string>
+    <string name="content_desc_next">下一首</string>
+    <string name="content_desc_play_pause">播放/暂停</string>
+
+    <!-- 关于页 -->
+    <string name="about_title">关于 Auralis</string>
+    <string name="about_subtitle">版本 · 设备昵称与 ID 管理</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">主题、音质、曲库与同步</string>
+    <string name="settings_section_other">其他</string>
+    <string name="sleep_timer_title">睡眠定时器</string>
+    <string name="sleep_timer_subtitle">定时暂停播放</string>
+    <string name="language_label">语言</string>
+    <string name="language_subtitle">目前只翻译了部分界面，会陆续补全</string>
+
+    <!-- 附近的 Auralis / 一起听 -->
+    <string name="no_nearby_devices">附近没有在线的 Auralis 设备</string>
+    <string name="share_to_nearby_device">分享给附近设备</string>
+    <string name="nearby_allow_listen_together">允许附近设备一起听我播放的歌</string>
+    <string name="nearby_hosting_on_subtitle">已开启 · 已绑定设备可以同步跟播</string>
+    <string name="nearby_hosting_off_subtitle">开启后，绑定过的设备能实时跟着你听同一首歌</string>
+    <string name="bound_label">已绑定</string>
+    <string name="no_devices_nearby">附近暂无设备</string>
+    <string name="new_devices_found">发现新设备</string>
+    <string name="action_push_current_song">推送当前歌</string>
+    <string name="action_pick_songs_to_send">选歌传输</string>
+    <string name="listening_together_active">正在一起听 · 点击退出</string>
+    <string name="listen_along">一起听 TA 正在放的歌</string>
+    <string name="room_song_missing">本机没有《%1$s》，无法跟播</string>
+
+    <!-- 全屏播放器 -->
+    <string name="lyrics_cache_cleared">歌词与封面缓存已清除，下次刷新将跳过此结果</string>
+    <string name="lyrics_import_success">歌词导入成功！</string>
+    <string name="import_failed">导入失败</string>
+    <string name="unknown_album">未知专辑</string>
+    <string name="unknown_genre">未知流派</string>
+    <string name="unknown_year">未知年份</string>
+    <string name="unknown_value">未知</string>
+    <string name="never_played">从未播放</string>
+    <string name="gain_not_detected">未检测到 (0.00 dB)</string>
+    <string name="parse_detail_failed">解析详情失败: %1$s</string>
+
+    <!-- 歌曲详情面板 (Song Detail Panel) -->
+    <string name="detail_section_basic">基础信息</string>
+    <string name="detail_section_audio_specs">音频规格</string>
+    <string name="detail_section_file_stats">文件与记录</string>
+    <string name="detail_title">歌名</string>
+    <string name="detail_artist">歌手</string>
+    <string name="detail_album">专辑</string>
+    <string name="detail_genre">流派</string>
+    <string name="detail_year">年份</string>
+    <string name="detail_quality">音质</string>
+    <string name="detail_sample_rate">采样率</string>
+    <string name="detail_bit_depth">位深度</string>
+    <string name="detail_channels">声道</string>
+    <string name="detail_channels_spatial">空间音频</string>
+    <string name="detail_channels_stereo">立体声</string>
+    <string name="detail_bitrate">码率</string>
+    <string name="detail_gain">动态增益</string>
+    <string name="detail_size">大小</string>
+    <string name="detail_duration">时长</string>
+    <string name="detail_play_count">累计播放</string>
+    <string name="detail_play_count_unit">次</string>
+    <string name="detail_last_played">最近播放</string>
+    <string name="detail_last_modified">修改时间</string>
+    <string name="detail_path">路径</string>
+    <string name="action_share_song">分享歌曲</string>
+    <string name="share_song_text">正在听：%1$s - %2$s</string>
+    <string name="bitperfect_speed_locked">Bit-perfect 已开启，硬件直通状态下无法修改倍速哦</string>
+    <string name="ab_point_a_set">A 点已设</string>
+    <string name="ab_point_b_set">B 点已设，循环开始</string>
+    <string name="ab_point_b_must_after_a">B 点必须在 A 点之后</string>
+    <string name="ab_cancelled">A-B 取消</string>
+    <string name="action_select_lyrics">选择歌词</string>
+    <string name="action_delete_lyrics_cover">删除歌词与封面</string>
+    <string name="action_select_cover">选择封面</string>
+    <string name="refreshing_covers_start">开始批量刷新网络封面…</string>
+    <string name="refreshed_covers_count">已刷新 %1$d 首无内嵌封面的歌曲</string>
+    <string name="action_refresh_all_covers">刷新全部网络封面</string>
+    <string name="added_to_favorites">已加入红心收藏 ❤️</string>
+    <string name="action_refresh_cover">刷新封面</string>
+    <string name="song_details_title">歌曲详情</string>
+    <string name="acoustic_audit_title">🔍 声学高频真伪鉴定 (Acoustic Quality Audit)</string>
+    <string name="decoding_pcm_fft">正在解码PCM并计算FFT频谱图...</string>
+    <string name="action_run_acoustic_audit">进行声学真伪鉴定 (Spek)</string>
+    <string name="spectrogram_disclaimer">※ 声学特征由 Auralis On-Demand Spectrogram 自动解码分析得出，由于静音片段或经典曲目特征可能有微弱误差，检测结果仅供参考。</string>
+    <string name="action_close">关闭</string>
+    <string name="confirm_delete_lyrics_cache_title">删除歌词与封面缓存？</string>
+    <string name="confirm_delete_lyrics_cache_body">此操作会把当前歌词加入黑名单，刷新时将跳过这条结果并尝试获取其他来源。</string>
+    <string name="dont_show_again">不再弹出确认</string>
+    <string name="action_confirm_delete">确认删除</string>
+    <string name="action_cancel">取消</string>
+    <string name="lyrics_multi_source_title">多源歌词精准选择</string>
+    <string name="search_keyword_label">搜索关键词</string>
+    <string name="action_search">搜索</string>
+    <string name="fetching_multi_platform_lyrics">正在并发抓取多平台歌词...</string>
+    <string name="no_matching_lyrics_found">未找到任何匹配的歌词，请更换关键词搜索</string>
+    <string name="smart_recommendation">✨ 智能综合推荐</string>
+    <string name="lyrics_applied_from">歌词成功应用自 [%1$s]！</string>
+    <string name="lyrics_fetch_failed">歌词获取失败，请尝试其他选项</string>
+    <string name="action_collapse">收起</string>
+    <string name="action_expand_more">展开更多</string>
+    <string name="fetching_multi_platform_covers">正在并发抓取多平台封面...</string>
+    <string name="no_covers_found">未找到任何封面</string>
+    <string name="cover_applied_smoothly">封面已顺滑实时应用！❤️</string>
+    <string name="action_drag_to_reorder">拖动排序</string>
+    <string name="action_select_and_apply">选择并应用</string>
+    <string name="duration_label">时长: %1$d:%2$s</string>
+    <string name="spectrogram_cutoff_label">频谱频率上限：%1$s kHz (Nyquist: %2$s kHz)</string>
+
+    <!-- 首页 / MusicAppScreen -->
+    <string name="sleep_timer_paused_toast">睡眠定时器：已暂停播放 💤</string>
+    <string name="delete_authorized_success">授权删除成功</string>
+    <string name="file_deleted_externally_cleanup">文件已在外部被删除，正在清理列表...</string>
+    <string name="already_next_song">已经是下一首啦</string>
+    <string name="moved_to_play_next">已移至下一首播放</string>
+    <string name="added_to_play_next">已添加到下一首</string>
+    <string name="delete_permanent_success">彻底删除成功</string>
+    <string name="delete_failed_file_locked">删除失败，文件可能被占用</string>
+    <string name="delete_restricted">删除受限</string>
+    <string name="delete_error">删除出错</string>
+    <string name="connecting_to_pc">正在连接电脑获取清单...</string>
+    <string name="already_up_to_date">手机已经是最新，没有缺少的歌曲！</string>
+    <string name="connect_failed_check_ip">连接失败，请检查电脑 IP 是否正确、且在同一 Wi-Fi</string>
+    <string name="bulk_import_done">批量导入完成：成功 %1$d 首，未匹配 %2$d 首</string>
+    <string name="new_song_auto_imported">新歌已自动入库！</string>
+    <string name="hide_lyrics_overlay">隐藏悬浮歌词</string>
+    <string name="need_music_access_title">需要访问音乐文件</string>
+    <string name="need_music_access_subtitle">请允许读取音频、通知与麦克风权限，以便扫描曲库、显示播放控制与律动效果</string>
+    <string name="action_grant_permission">授予权限</string>
+    <string name="list_refreshed">列表已刷新</string>
+    <string name="empty_favorites_title">还没有收藏</string>
+    <string name="empty_library_title">曲库为空</string>
+    <string name="empty_favorites_subtitle">点击歌曲菜单，将喜欢的音乐加入红心收藏</string>
+    <string name="empty_library_subtitle">下拉可刷新本地曲库，或在设置中添加扫描文件夹</string>
+    <string name="no_play_history_title">暂无播放记录</string>
+    <string name="no_play_history_subtitle">多听几首歌，这里会展示你的常听榜单</string>
+    <string name="sort_by_count">按次数</string>
+    <string name="sort_by_recent">按最近播放</string>
+    <string name="action_new_custom_playlist">新建自定义歌单</string>
+    <string name="empty_playlists_title">还没有歌单</string>
+    <string name="empty_playlists_subtitle">点击上方按钮，创建你的第一个自定义歌单</string>
+    <string name="created_at_label">创建于 %1$s</string>
+    <string name="playlist_exported_to">已导出至 Download/Auralis/Playlists: %1$s</string>
+    <string name="export_failed">导出失败</string>
+    <string name="action_export_playlist">导出歌单</string>
+    <string name="song_count_label">共 %1$d 首</string>
+    <string name="empty_playlist_songs_title">歌单是空的</string>
+    <string name="empty_playlist_songs_subtitle">在歌曲列表中长按或点击菜单，添加到当前歌单</string>
+    <string name="removed_from_playlist">已从歌单移除</string>
+    <string name="sleep_timer_current_status">当前：%1$d分%2$d秒后暂停</string>
+    <string name="action_cancel_timer">取消定时器</string>
+    <string name="sleep_15min">15 分钟</string>
+    <string name="sleep_30min">30 分钟</string>
+    <string name="sleep_45min">45 分钟</string>
+    <string name="sleep_1hr">1 小时</string>
+    <string name="sleep_90min">90 分钟</string>
+    <string name="custom_minutes_label">自定义时间 (分钟)</string>
+    <string name="invalid_minutes_input">请输入有效的分钟数</string>
+    <string name="action_confirm_custom">确认自定义</string>
+    <string name="deep_scan_started">开始深度解析...</string>
+    <string name="deep_scan_done">深度解析完成！</string>
+    <string name="library_clean_no_duplicates">太棒了！你的曲库非常干净，没有重复歌曲 ✨</string>
+    <string name="receiving_ellipsis">接收中…</string>
+    <string name="received_song">✅ 已接收：%1$s</string>
+    <string name="download_failed">❌ 下载失败</string>
+    <string name="action_clean_duplicates">清理重复歌曲</string>
+    <string name="duplicate_group_label">组 %1$d · %2$s</string>
+    <string name="physical_path_label">物理路径: %1$s</string>
+    <string name="parsing_ellipsis">等待解析...</string>
+    <string name="bit_depth_label">位深度: %1$s</string>
+    <string name="sample_rate_label">采样率: %1$s</string>
+    <string name="replay_gain_label">音量增益 (ReplayGain): %1$s</string>
+    <string name="found_new_songs_title">发现新歌曲</string>
+    <string name="action_select_all">全选</string>
+    <string name="has_lyrics_suffix"> • 带歌词</string>
+    <string name="switched_to_background_sync">已切换至后台同步，请下拉通知栏查看进度</string>
+    <string name="action_background_sync">后台同步</string>
+    <string name="syncing_title">同步中</string>
+    <string name="add_to_playlist_title">添加到歌单</string>
+    <string name="action_new_playlist">新建歌单</string>
+    <string name="no_custom_playlists">暂无自定义歌单</string>
+    <string name="added_to_playlist_named">已添加到 %1$s</string>
+    <string name="add_to_playlist_failed">添加失败或已在歌单中</string>
+    <string name="playlist_name_label">歌单名称</string>
+    <string name="playlist_created_added_song">已创建并添加歌曲</string>
+    <string name="playlist_created_success">歌单创建成功</string>
+    <string name="action_confirm">确定</string>
+
+    <!-- 设置页 -->
+    <string name="settings_section_appearance">外观</string>
+    <string name="theme_color_label">主题配色</string>
+    <string name="custom_hue_label">自定义色相</string>
+    <string name="dark_light_mode_label">深浅色模式</string>
+    <string name="follow_system">跟随系统</string>
+    <string name="dark_mode">深色</string>
+    <string name="light_mode">浅色</string>
+    <string name="fullscreen_player_bg_label">全屏播放器背景</string>
+    <string name="visualizer_sensitivity_label">律动灵敏度</string>
+    <string name="settings_section_audio_quality">音频质量</string>
+    <string name="volume_normalization_title">音量标准化</string>
+    <string name="replaygain_subtitle">ReplayGain · 自动平衡不同歌曲响度</string>
+    <string name="usb_passthrough_title">USB 源码直通</string>
+    <string name="bitperfect_subtitle_needs_android14">Bit-perfect · 需要 Android 14+</string>
+    <string name="bitperfect_subtitle_active">Bit-perfect · 已绕过系统混音器 ✓</string>
+    <string name="bitperfect_subtitle_needs_usb_dac">连接 USB DAC 生效</string>
+    <string name="crossfade_title">淡入淡出 (Crossfade)</string>
+    <string name="state_off">关闭</string>
+    <string name="crossfade_subtitle">切歌时音频平滑过渡，消除生硬停顿</string>
+    <string name="settings_section_lyrics">歌词</string>
+    <string name="lyrics_overlay_subtitle">不打开全屏播放器，也能在迷你播放条上方看当前歌词</string>
+    <string name="lyrics_overlay_title">悬浮歌词</string>
+    <string name="online_lyrics_search_title">在线歌词搜索</string>
+    <string name="online_lyrics_search_subtitle">无本地 LRC 时自动联网获取</string>
+    <string name="lyrics_source_priority_label">优先来源</string>
+    <string name="source_auto">自动</string>
+    <string name="source_netease">网易云</string>
+    <string name="source_qqmusic">QQ音乐</string>
+    <string name="source_kugou">酷狗</string>
+    <string name="action_batch_import_lrc">批量导入 LRC</string>
+    <string name="batch_import_lrc_subtitle">从文件管理器批量选择歌词文件</string>
+    <string name="settings_section_library">音乐库</string>
+    <string name="scan_all_music_label">扫描全盘音乐</string>
+    <string name="action_remove">移除</string>
+    <string name="action_add_scan_path">添加扫描路径</string>
+    <string name="add_scan_path_subtitle">指定文件夹，不再扫描全盘</string>
+    <string name="action_deep_rescan">重新深度扫描</string>
+    <string name="deep_rescan_subtitle">清空缓存，重新解析所有歌曲</string>
+    <string name="clean_duplicates_subtitle">智能扫描并清理相同音轨</string>
+    <string name="settings_section_connectivity">连接与同步</string>
+    <string name="pc_speaker_mode_title">PC 有线音箱模式</string>
+    <string name="pc_speaker_mode_listening">正在监听端口…</string>
+    <string name="pc_speaker_mode_subtitle">将手机变为 PC 的零延迟音箱</string>
+    <string name="sync_save_path_title">同步保存路径</string>
+    <string name="configured_label">已配置</string>
+    <string name="no_download_location_set">尚未设置下载位置</string>
+    <string name="pc_lan_ip_label">电脑局域网 IP</string>
+    <string name="accept_nearby_push_title">接受附近设备推送</string>
+    <string name="accept_nearby_push_subtitle_on">有设备分享歌曲时会弹出提示</string>
+    <string name="accept_nearby_push_subtitle_off">已关闭，不接受任何传入请求</string>
+    <string name="nearby_auralis_title">附近的 Auralis</string>
+    <string name="nearby_auralis_subtitle">在同一 WiFi 下与其他设备互传歌曲</string>
+    <string name="theme_dynamic_cover">跟随专辑封面</string>
+    <string name="theme_obsidian">近 AMOLED 纯黑</string>
+    <string name="theme_midnight">深邃海军蓝</string>
+    <string name="theme_amber">暖金深棕</string>
+    <string name="theme_rose">深玫红调</string>
+    <string name="theme_aurora">极光绿意</string>
+    <string name="theme_violet">梦幻烟紫</string>
+    <string name="theme_solar">正午金辉</string>
+
+    <!-- 主题预设短名称（卡片主标题，跟theme_xxx的长描述是两码事） -->
+    <string name="preset_name_dynamic">专辑色</string>
+    <string name="preset_name_obsidian">黑曜石</string>
+    <string name="preset_name_midnight">深海</string>
+    <string name="preset_name_amber">琥珀</string>
+    <string name="preset_name_rose">玫瑰</string>
+    <string name="preset_name_jade">翠玉</string>
+    <string name="preset_name_aurora">极光</string>
+    <string name="preset_name_violet">烟紫</string>
+    <string name="preset_name_solar">正午</string>
+    <string name="preset_name_custom">自定义</string>
+
+    <!-- 频谱声学鉴定结论 -->
+    <string name="verdict_true_lossless">🌟 纯正高清母带 / 真无损 (True Lossless)</string>
+    <string name="verdict_true_lossless_detail">高频上限达到 %1$s kHz，声学特征完全符合高保真/真无损规格。</string>
+    <string name="verdict_upscaled_lossy">⚠️ 疑似 MP3-320kbps 转制 (Upscaled Lossy)</string>
+    <string name="verdict_upscaled_lossy_detail">高频上限在 %1$s kHz 处出现衰减，表现出典型的 320kbps 高频截断特征。</string>
+    <string name="verdict_fake_lossless">❌ 极高嫌疑高频欺诈 / MP3-128kbps 转制 (Fake Lossless)</string>
+    <string name="verdict_fake_lossless_detail">高频上限严重锁死在 %1$s kHz，有极高嫌疑是低码率 MP3 强行扩容或假无损。</string>
+
+    <!-- 全屏播放器背景动效模式 -->
+    <string name="bgmode_static">静态渐变</string>
+    <string name="bgmode_breathing">呼吸律动</string>
+    <string name="bgmode_fluid">流体漫游</string>
+    <string name="bgmode_horizon">深邃地平线</string>
+    <string name="bgmode_classic_eq">极细 EQ (Pro)</string>
+    <string name="bgmode_stardust">星云耀斑 (Flare)</string>
+
+    <!-- 电脑同步 -->
+    <string name="cannot_connect_to_pc">无法连接到电脑</string>
+    <string name="cannot_access_selected_folder">无法访问所选文件夹</string>
+    <string name="scanning_local_directory">正在扫描本地目录，准备极速引擎...</string>
+    <string name="incomplete_file_redownload">%1$s 发现不完整文件，重新下载: %2$s</string>
+    <string name="downloading_audio">%1$s 正在下载音频: %2$s</string>
+    <string name="audio_exists_complete_skip">%1$s 音频已存在且完整，跳过: %2$s</string>
+    <string name="completing_lyrics">%1$s 正在补全歌词: %2$s</string>
+    <string name="sync_all_done">🎉 全部处理完成！</string>
+    <string name="sync_error_prefix">❌ 错误: %1$s</string>
+    <string name="preparing_download">准备下载...</string>
+    <string name="music_sync_progress_title">音乐同步进度</string>
+    <string name="sync_complete_celebration">🎉 同步大功告成！</string>
+    <string name="lan_music_sync_channel">局域网音乐同步</string>
+
+    <!-- 网易云 Cookie 授权（防 -462 屏蔽） -->
+    <string name="netease_cookie_auth_title">网易云 API 授权 (防屏蔽)</string>
+    <string name="netease_cookie_auth_body">遇到封面/歌词刮削失败 (-462拦截) 时，请在电脑浏览器登录网易云网页版，按F12在Network面板抓取任意请求的 Cookie 填入下方。</string>
+    <string name="custom_cookie_label">自定义 Cookie</string>
+
+    <!-- 通用UI组件（歌曲行/专辑行/歌手行/大数据卡片/睡眠定时器条） -->
+    <string name="never_played_short">从未</string>
+    <string name="play_count_times">%1$d 次</string>
+    <string name="song_count_with_artist">%1$s · %2$d 首歌曲</string>
+    <string name="song_count_songs_suffix">%1$d 首歌曲</string>
+    <string name="listening_stats_title">听歌大数据</string>
+    <string name="listening_stats_summary">累计 %1$d 次 · %2$d 首心头好</string>
+    <string name="pause_in_label">%1$s 后暂停</string>
+
+    <!-- 附近的 Auralis -->
+    <string name="scanning_label">扫描中</string>
+    <string name="action_rescan">重新扫描</string>
+    <string name="bind_device_title">绑定设备？</string>
+    <string name="bind_device_body">将「%1$s」添加到绑定列表后，下次无需重新扫描，直接出现在顶部。</string>
+    <string name="action_not_now">暂不</string>
+    <string name="transfer_complete">✅ 传输完成！</string>
+    <string name="transfer_failed_maybe_not_receiving">❌ 传输失败，对方可能未开启接收</string>
+    <string name="online_bound_label">在线 · 已绑定</string>
+    <string name="offline_bound_label">离线 · 已绑定</string>
+    <string name="select_songs_to_send_title">选择要发送的歌曲</string>
+    <string name="selected_count_label">已选 %1$d 首</string>
+    <string name="search_song_artist_placeholder">搜索歌名、歌手…</string>
+    <string name="action_sort">排序</string>
+    <string name="sort_ascending">升序</string>
+    <string name="sort_descending">降序</string>
+    <string name="sort_by_name">按名称</string>
+    <string name="sort_by_artist">按歌手</string>
+    <string name="sort_by_album">按专辑</string>
+    <string name="sort_by_date">按日期</string>
+    <string name="sort_by_size">按大小</string>
+    <string name="sort_by_play_count">按播放次数</string>
+    <string name="no_matching_songs">没有找到匹配的歌曲</string>
+    <string name="transferring_ellipsis">传输中…</string>
+    <string name="send_count_label">发送 %1$d 首</string>
+    <string name="wants_to_share_song">想和你分享一首歌</string>
+    <string name="has_lyrics_badge">📄 含歌词</string>
+    <string name="action_receive_now">立即接收</string>
+    <string name="action_not_now_alt">暂时不要</string>
+    <string name="currently_playing_label">当前正在播放</string>
+    <string name="no_nearby_devices_detail">附近没有在线的 Auralis 设备\n请确保对方在同一 WiFi 且已开启应用</string>
+    <string name="pushed_to_device">✅ 已推送给 %1$s</string>
+    <string name="push_failed">❌ 推送失败</string>
+
+    <!-- 后台播放服务 -->
+    <string name="audio_quality_hires_verified">真实高清音频 ✓</string>
+    <string name="audio_quality_maybe_mp3_320">可能是 MP3 320kbps 转制</string>
+    <string name="audio_quality_suspect_mp3_256">疑似 MP3 256kbps 转制</string>
+    <string name="audio_quality_suspect_mp3_128_192">疑似 MP3 128~192kbps 转制</string>
+    <string name="audio_quality_suspect_aac_low_bitrate">疑似 AAC / 低码率转制</string>
+    <string name="audio_quality_suspect_very_low_bitrate">疑似极低码率来源</string>
+    <string name="dac_exclusive_active">DAC 独占已激活: %1$s kHz</string>
+    <string name="dac_exclusive_failed_unsupported">DAC 独占失败: 设备不支持该规格</string>
+    <string name="android_mixing_restored">已恢复 Android 系统混音</string>
+    <string name="browse_favorites">❤️ 红心收藏</string>
+
+    <!-- 首页歌曲列表 / 右键菜单 -->
+    <string name="first_track_label">首曲目</string>
+    <string name="sort_ascending_az">A-Z / 升序排列</string>
+    <string name="sort_descending_za">Z-A / 降序排列</string>
+    <string name="action_settings">设置</string>
+    <string name="action_sync">同步</string>
+    <string name="search_song_format_placeholder">搜索歌名、歌手、格式…</string>
+    <string name="action_clear">清除</string>
+    <string name="action_play_next">下一首播放</string>
+    <string name="action_add_to_playlist_ellipsis">添加到歌单...</string>
+    <string name="action_remove_from_playlist">从歌单移除</string>
+    <string name="action_import_lrc_lyrics">导入 LRC 歌词</string>
+    <string name="action_delete_permanently">彻底删除文件</string>
+    <string name="menu_label">菜单</string>
+    <string name="confirm_delete_file_body">将彻底从手机存储中删除此文件，不可恢复。</string>
+    <string name="action_delete">删除</string>
+
+    <!-- 收听足迹 -->
+    <string name="action_back">返回</string>
+    <string name="this_year_favorite">本年最爱</string>
+    <string name="this_month_favorite">本月最爱</string>
+    <string name="month_all_year">全年</string>
+    <string name="month_1">1月</string>
+    <string name="month_2">2月</string>
+    <string name="month_3">3月</string>
+    <string name="month_4">4月</string>
+    <string name="month_5">5月</string>
+    <string name="month_6">6月</string>
+    <string name="month_7">7月</string>
+    <string name="month_8">8月</string>
+    <string name="month_9">9月</string>
+    <string name="month_10">10月</string>
+    <string name="month_11">11月</string>
+    <string name="month_12">12月</string>
+    <string name="plays_this_year">今年播放</string>
+    <string name="plays_this_month">本月播放</string>
+    <string name="plays_count_label">%1$d 次</string>
+    <string name="total_listening_label">累计收听</string>
+    <string name="year_play_distribution">%1$s 年播放分布</string>
+    <string name="month_daily_plays">%1$s 年 %2$d月 每日播放</string>
+    <string name="play_count_suffix">%1$d次</string>
+    <string name="no_listening_history">还没有收听记录</string>
+    <string name="play_some_songs_hint">播放一些歌曲后再来看看</string>
+
+    <!-- 关于页 -->
+    <string name="about_tagline">本地无损音乐播放器</string>
+    <string name="easter_egg_music_fanatic">🎉 你是真正的音乐痴迷者！</string>
+    <string name="features_title">功能特性</string>
+    <string name="feature_hires_bitperfect">Hi-Res / DSD / Bit-perfect 播放</string>
+    <string name="feature_multi_source_lyrics">多源自动匹配歌词（网易云 / QQ / 酷狗）</string>
+    <string name="feature_dynamic_theme">专辑封面动态主题色</string>
+    <string name="feature_android_auto">Android Auto 驾驶模式</string>
+    <string name="feature_wireless_transfer">Auralis 设备间无线互传歌曲</string>
+    <string name="feature_equalizer">均衡器 / Bass Boost / 响度增强</string>
+    <string name="feature_listening_stats">收听足迹统计</string>
+    <string name="credits_title">制作人员</string>
+    <string name="credit_design_integration_label">设计 &amp; 集成</string>
+    <string name="credit_ai_assist_label">AI 代码协助</string>
+    <string name="privacy_title">隐私</string>
+    <string name="privacy_body">Auralis 不收集任何个人数据，不上传任何文件。所有音乐文件、歌词、封面均存储于本地设备。联网功能仅用于获取歌词与封面元数据，以及局域网设备间的直连传输。</string>
+    <string name="nearby_transfer_device_info_title">附近传输 · 设备信息</string>
+    <string name="device_nickname_label">设备昵称</string>
+    <string name="action_save">保存</string>
+    <string name="action_edit">编辑</string>
+    <string name="device_id_label">设备 ID</string>
+    <string name="copyright_line">© 2026 白开水 · All Rights Reserved\nAI-assisted code integration by Claude</string>
+
+    <!-- 均衡器 -->
+    <string name="equalizer_bypassed_title">均衡器已旁路</string>
+    <string name="equalizer_bypassed_body">当前已开启 USB 源码直通，音频信号直接发送至 DAC，系统 EQ 无法介入。</string>
+    <string name="action_understood">了解</string>
+    <string name="audio_session_not_ready">AudioSessionId 尚未准备好，请先播放任意一首歌曲后再打开 EQ。</string>
+    <string name="equalizer_request_rejected">当前手机系统拒绝了全局均衡器请求：%1$s</string>
+    <string name="equalizer_unavailable_title">均衡器不可用</string>
+    <string name="unknown_error">未知错误</string>
+    <string name="audiophile_equalizer_title">均衡器</string>
+    <string name="action_save_preset">保存预设</string>
+    <string name="my_presets_label">我的预设</string>
+    <string name="system_presets_label">系统方案</string>
+    <string name="action_done">完成</string>
+    <string name="action_reset">重置</string>
+    <string name="preset_name_label">预设名称</string>
+    <string name="unknown_title">未知歌名</string>
+
+    <!-- 播放器通用UI组件 -->
+    <string name="lyrics_tab_label">歌词</string>
+    <string name="playback_speed_title">播放倍速 (自然变调)</string>
+    <string name="current_speed_label">当前倍速: %1$s</string>
+    <string name="natural_speed_hint">提示：已启用自然变速算法。减速时声音变粗，加速时声音变细，避免了强制保调带来的金属电音，以获得最佳无损音质与纯净听感。</string>
+    <string name="action_reset_1x">重置 1.0x</string>
+    <string name="no_lyrics_yet">暂无歌词</string>
+    <string name="action_import_lrc">导入 LRC</string>
+    <string name="playback_queue_title">播放队列</string>
+    <string name="song_count_suffix">%1$d 首</string>
 </resources>

@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
@@ -57,6 +58,7 @@ fun SettingsScreen(
     onNearbyDevices: () -> Unit, onAbout: () -> Unit
 ) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val scrollState = rememberScrollState()
     val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
 
@@ -81,15 +83,15 @@ fun SettingsScreen(
         ) {
 
             // ── 〇 外观 (哥哥最爱的 v1.5 风格网格) ─────────────────────────────
-            SettingsSection("外观", Icons.Outlined.Palette, MaterialTheme.colorScheme.primary) {
+            SettingsSection(stringResource(R.string.settings_section_appearance), Icons.Outlined.Palette, MaterialTheme.colorScheme.primary) {
                 Column(modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)) {
-                    Text("主题配色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+                    Text(stringResource(R.string.theme_color_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(12.dp))
 
                     ThemePickerGrid(context)
 
                     Spacer(Modifier.height(24.dp))
-                    Text("自定义色相", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+                    Text(stringResource(R.string.custom_hue_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(8.dp))
 
                     val currentPreset by ThemeManager.preset.collectAsState()
@@ -129,11 +131,11 @@ fun SettingsScreen(
                     }
 
                     Spacer(Modifier.height(12.dp))
-                    Text("深浅色模式", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+                    Text(stringResource(R.string.dark_light_mode_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(10.dp))
                     val forceDark by ThemeManager.forceDark.collectAsState()
                     Row(modifier = Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(null to "跟随系统", true to "深色", false to "浅色").forEach { (value, label) ->
+                        listOf(null to stringResource(R.string.follow_system), true to stringResource(R.string.dark_mode), false to stringResource(R.string.light_mode)).forEach { (value, label) ->
                             val selected = forceDark == value
                             FilterChip(selected = selected, onClick = { ThemeManager.setForceDark(value, context) }, label = { Text(label, fontSize = 12.sp) }, leadingIcon = if (selected) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(14.dp)) } } else null)
                         }
@@ -142,7 +144,7 @@ fun SettingsScreen(
 
                 SettingsDivider()
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text("全屏播放器背景", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.fullscreen_player_bg_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(10.dp))
                     // 👇 加上 horizontalScroll，滑动丝滑如德芙！
                     Row(
@@ -155,7 +157,7 @@ fun SettingsScreen(
                             FilterChip(
                                 selected = bgMode == mode,
                                 onClick = { bgMode = mode; prefs.edit().putString("bg_mode", mode.name).apply() },
-                                label = { Text(mode.label, fontSize = 12.sp) }
+                                label = { Text(backgroundModeDisplayName(mode), fontSize = 12.sp) }
                             )
                         }
                     }
@@ -165,7 +167,7 @@ fun SettingsScreen(
                         Column(modifier = Modifier.padding(top = 16.dp)) {
                             var sensitivity by remember { mutableFloatStateOf(prefs.getFloat("reactive_sensitivity", 1.5f)) }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                                Text("律动灵敏度", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.visualizer_sensitivity_label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(String.format("%.1fx", sensitivity), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             }
                             Slider(
@@ -181,13 +183,13 @@ fun SettingsScreen(
             }
 
             // ── 一 音频质量 (统一为粉色系) ──────────────────────────────────────
-            SettingsSection("音频质量", Icons.Outlined.Headphones, MaterialTheme.colorScheme.tertiary) {
+            SettingsSection(stringResource(R.string.settings_section_audio_quality), Icons.Outlined.Headphones, MaterialTheme.colorScheme.tertiary) {
                 SettingToggleRow(
                     item = SettingToggleItem(
                         icon = Icons.Outlined.Equalizer,
                         iconTint = MaterialTheme.colorScheme.tertiary,
-                        title = "音量标准化",
-                        subtitle = "ReplayGain · 自动平衡不同歌曲响度",
+                        title = stringResource(R.string.volume_normalization_title),
+                        subtitle = stringResource(R.string.replaygain_subtitle),
                         checked = enableReplayGain,
                         onToggle = onReplayGainChange
                     )
@@ -197,8 +199,8 @@ fun SettingsScreen(
                     item = SettingToggleItem(
                         icon = Icons.Outlined.SettingsInputHdmi,
                         iconTint = MaterialTheme.colorScheme.tertiary,
-                        title = "USB 源码直通",
-                        subtitle = if (Build.VERSION.SDK_INT < 34) "Bit-perfect · 需要 Android 14+" else if (enableBitPerfect) "Bit-perfect · 已绕过系统混音器 ✓" else "连接 USB DAC 生效",
+                        title = stringResource(R.string.usb_passthrough_title),
+                        subtitle = if (Build.VERSION.SDK_INT < 34) stringResource(R.string.bitperfect_subtitle_needs_android14) else if (enableBitPerfect) stringResource(R.string.bitperfect_subtitle_active) else stringResource(R.string.bitperfect_subtitle_needs_usb_dac),
                         checked = enableBitPerfect,
                         enabled = Build.VERSION.SDK_INT >= 34,
                         onToggle = { onBitPerfectChange(it) }
@@ -211,12 +213,12 @@ fun SettingsScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Outlined.CompareArrows, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(22.dp))
                             Spacer(Modifier.width(14.dp))
-                            Text("淡入淡出 (Crossfade)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.crossfade_title), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                         }
-                        Text(if (crossfadeSecs > 0) "${crossfadeSecs.toInt()}s" else "关闭", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+                        Text(if (crossfadeSecs > 0) "${crossfadeSecs.toInt()}s" else stringResource(R.string.state_off), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text("切歌时音频平滑过渡，消除生硬停顿", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 36.dp))
+                    Text(stringResource(R.string.crossfade_subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 36.dp))
                     Slider(
                         value = crossfadeSecs,
                         onValueChange = { crossfadeSecs = it },
@@ -229,13 +231,29 @@ fun SettingsScreen(
             }
 
             // ── 二 歌词 ────────────────────────────────────────
-            SettingsSection("歌词", Icons.Outlined.Lyrics, MaterialTheme.colorScheme.secondary) {
+            SettingsSection(stringResource(R.string.settings_section_lyrics), Icons.Outlined.Lyrics, MaterialTheme.colorScheme.secondary) {
+                var enableLyricsOverlay by remember { mutableStateOf(prefs.getBoolean("lyrics_overlay_enabled", true)) }
+                SettingToggleRow(
+                    item = SettingToggleItem(
+                        icon = Icons.Outlined.Subtitles,
+                        iconTint = MaterialTheme.colorScheme.secondary,
+                        title = stringResource(R.string.lyrics_overlay_title),
+                        subtitle = stringResource(R.string.lyrics_overlay_subtitle),
+                        checked = enableLyricsOverlay,
+                        onToggle = {
+                            enableLyricsOverlay = it
+                            prefs.edit().putBoolean("lyrics_overlay_enabled", it).apply()
+                            PlayerStateHolder.setLyricsOverlayEnabled(it)
+                        }
+                    )
+                )
+                SettingsDivider()
                 SettingToggleRow(
                     item = SettingToggleItem(
                         icon = Icons.Outlined.CloudDownload,
                         iconTint = MaterialTheme.colorScheme.secondary,
-                        title = "在线歌词搜索",
-                        subtitle = "无本地 LRC 时自动联网获取",
+                        title = stringResource(R.string.online_lyrics_search_title),
+                        subtitle = stringResource(R.string.online_lyrics_search_subtitle),
                         checked = enableOnlineLyrics,
                         onToggle = { enableOnlineLyrics = it; prefs.edit().putBoolean("enable_online_lyrics", it).apply() }
                     )
@@ -244,17 +262,17 @@ fun SettingsScreen(
                     Column {
                         SettingsDivider()
                         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Text("优先来源", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.lyrics_source_priority_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(10.dp))
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.horizontalScroll(rememberScrollState())
                             ) {
                                 listOf(
-                                    "auto" to "自动",
-                                    "163" to "网易云",
-                                    "qq" to "QQ音乐",
-                                    "kugou" to "酷狗",
+                                    "auto" to stringResource(R.string.source_auto),
+                                    "163" to stringResource(R.string.source_netease),
+                                    "qq" to stringResource(R.string.source_qqmusic),
+                                    "kugou" to stringResource(R.string.source_kugou),
                                     "lrclib" to "LrcLib"
                                 ).forEach { (key, label) ->
                                     FilterChip(
@@ -271,36 +289,36 @@ fun SettingsScreen(
                     }
                 }
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.FileOpen, iconTint = MaterialTheme.colorScheme.secondary, title = "批量导入 LRC", subtitle = "从文件管理器批量选择歌词文件", onClick = onBatchImportLrc)
+                SettingsClickRow(icon = Icons.Outlined.FileOpen, iconTint = MaterialTheme.colorScheme.secondary, title = stringResource(R.string.action_batch_import_lrc), subtitle = stringResource(R.string.batch_import_lrc_subtitle), onClick = onBatchImportLrc)
             }
 
             // ── 三 音乐库 ────────────────────────────────────────────────────
             val libraryColor = Color(0xFF7C4DFF)
-            SettingsSection("音乐库", Icons.Outlined.LibraryMusic, libraryColor) {
-                if (allowedFolders.isEmpty()) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text("扫描全盘音乐", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-                else { allowedFolders.forEachIndexed { i, folder -> if (i > 0) SettingsDivider(); Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Folder, null, tint = libraryColor, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(folder, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2); IconButton(onClick = { onFolderRemoved(folder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, "移除", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) } } } }
+            SettingsSection(stringResource(R.string.settings_section_library), Icons.Outlined.LibraryMusic, libraryColor) {
+                if (allowedFolders.isEmpty()) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.scan_all_music_label), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                else { allowedFolders.forEachIndexed { i, folder -> if (i > 0) SettingsDivider(); Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Folder, null, tint = libraryColor, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(folder, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2); IconButton(onClick = { onFolderRemoved(folder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, stringResource(R.string.action_remove), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) } } } }
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.CreateNewFolder, iconTint = libraryColor, title = "添加扫描路径", subtitle = "指定文件夹，不再扫描全盘", onClick = { folderPickerLauncher.launch(null) })
+                SettingsClickRow(icon = Icons.Outlined.CreateNewFolder, iconTint = libraryColor, title = stringResource(R.string.action_add_scan_path), subtitle = stringResource(R.string.add_scan_path_subtitle), onClick = { folderPickerLauncher.launch(null) })
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.Refresh, iconTint = libraryColor, title = "重新深度扫描", subtitle = "清空缓存，重新解析所有歌曲", onClick = onRescanLibrary)
+                SettingsClickRow(icon = Icons.Outlined.Refresh, iconTint = libraryColor, title = stringResource(R.string.action_deep_rescan), subtitle = stringResource(R.string.deep_rescan_subtitle), onClick = onRescanLibrary)
                 SettingsDivider()
                 SettingsClickRow(
                     icon = Icons.Outlined.ContentCopy,
                     iconTint = libraryColor,
-                    title = "清理重复歌曲",
-                    subtitle = "智能扫描并清理相同音轨",
+                    title = stringResource(R.string.action_clean_duplicates),
+                    subtitle = stringResource(R.string.clean_duplicates_subtitle),
                     onClick = onFindDuplicates
                 )
             }
 
             // ── 四 连接与同步 ──────────────────────────────────────────────────
             val syncColor = Color(0xFF00897B)
-            SettingsSection("连接与同步", Icons.Outlined.Wifi, syncColor) {
-                SettingToggleRow(item = SettingToggleItem(icon = Icons.Outlined.Speaker, iconTint = syncColor, title = "PC 有线音箱模式", subtitle = if (isPcMode) "正在监听端口…" else "将手机变为 PC 的零延迟音箱", checked = isPcMode, onToggle = onPcModeChange))
+            SettingsSection(stringResource(R.string.settings_section_connectivity), Icons.Outlined.Wifi, syncColor) {
+                SettingToggleRow(item = SettingToggleItem(icon = Icons.Outlined.Speaker, iconTint = syncColor, title = stringResource(R.string.pc_speaker_mode_title), subtitle = if (isPcMode) stringResource(R.string.pc_speaker_mode_listening) else stringResource(R.string.pc_speaker_mode_subtitle), checked = isPcMode, onToggle = onPcModeChange))
                 SettingsDivider()
-                SettingsClickRow(icon = Icons.Outlined.FolderSpecial, iconTint = syncColor, title = "同步保存路径", subtitle = if (savedFolderUriStr != null) "已配置" else "尚未设置下载位置", onClick = onPickFolder)
+                SettingsClickRow(icon = Icons.Outlined.FolderSpecial, iconTint = syncColor, title = stringResource(R.string.sync_save_path_title), subtitle = if (savedFolderUriStr != null) stringResource(R.string.configured_label) else stringResource(R.string.no_download_location_set), onClick = onPickFolder)
                 SettingsDivider()
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text("电脑局域网 IP") }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) { OutlinedTextField(value = pcServerIp, onValueChange = onPcServerIpChange, label = { Text(stringResource(R.string.pc_lan_ip_label)) }, leadingIcon = { Icon(Icons.Outlined.Computer, null, modifier = Modifier.size(20.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                     SettingsDivider()
 // 接收开关
                     var receiveEnabled by remember {
@@ -310,8 +328,8 @@ fun SettingsScreen(
                         item = SettingToggleItem(
                             icon     = Icons.Outlined.Inbox,
                             iconTint = syncColor,
-                            title    = "接受附近设备推送",
-                            subtitle = if (receiveEnabled) "有设备分享歌曲时会弹出提示" else "已关闭，不接受任何传入请求",
+                            title    = stringResource(R.string.accept_nearby_push_title),
+                            subtitle = if (receiveEnabled) stringResource(R.string.accept_nearby_push_subtitle_on) else stringResource(R.string.accept_nearby_push_subtitle_off),
                             checked  = receiveEnabled,
                             onToggle = {
                                 receiveEnabled = it
@@ -323,20 +341,92 @@ fun SettingsScreen(
                     SettingsClickRow(
                         icon     = Icons.Outlined.Wifi,
                         iconTint = syncColor,
-                        title    = "附近的 Auralis",
-                        subtitle = "在同一 WiFi 下与其他设备互传歌曲",
+                        title    = stringResource(R.string.nearby_auralis_title),
+                        subtitle = stringResource(R.string.nearby_auralis_subtitle),
                         onClick  = onNearbyDevices
                     )}
             }
 
-            SettingsSection("其他", Icons.Outlined.MoreHoriz, MaterialTheme.colorScheme.outline) {
-                SettingsClickRow(icon = Icons.Outlined.Bedtime, iconTint = Color(0xFF5C6BC0), title = "睡眠定时器", subtitle = "定时暂停播放", onClick = onShowSleepTimer)
+            var customCookie by remember {
+                mutableStateOf(prefs.getString("netease_custom_cookie", "") ?: "")
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        stringResource(R.string.netease_cookie_auth_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.netease_cookie_auth_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = customCookie,
+                        onValueChange = {
+                            customCookie = it
+                            prefs.edit().putString("netease_custom_cookie", it).apply()
+                        },
+                        label = { Text(stringResource(R.string.custom_cookie_label)) },
+                        placeholder = { Text("MUSIC_U=xxx; __csrf=yyy...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
+            SettingsSection(stringResource(R.string.settings_section_other), Icons.Outlined.MoreHoriz, MaterialTheme.colorScheme.outline) {
+                SettingsClickRow(icon = Icons.Outlined.Bedtime, iconTint = Color(0xFF5C6BC0), title = stringResource(R.string.sleep_timer_title), subtitle = stringResource(R.string.sleep_timer_subtitle), onClick = onShowSleepTimer)
+                SettingsDivider()
+                // ── 语言切换：中文 / English ──
+                val currentLang by LocalizationManager.language.collectAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.Language, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.language_label), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(
+                            stringResource(R.string.language_subtitle),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AppLanguage.entries.forEach { lang ->
+                            FilterChip(
+                                selected = currentLang == lang,
+                                onClick = {
+                                    LocalizationManager.setLanguage(context, lang)
+                                    // 光改偏好设置不够——弹窗(AlertDialog/Dialog)拿到的是
+                                    // Activity attachBaseContext 时那份 Resources，
+                                    // 必须让 Activity 重新走一遍生命周期才能让所有窗口都刷新。
+                                    activity.recreate()
+                                },
+                                label = { Text(lang.displayName) }
+                            )
+                        }
+                    }
+                }
                 SettingsDivider()
                 SettingsClickRow(
                     icon     = Icons.Outlined.Info,
                     iconTint = MaterialTheme.colorScheme.outline,
-                    title    = "关于 Auralis",
-                    subtitle = "版本 7.5 · 设备昵称与 ID 管理",
+                    title    = stringResource(R.string.about_title),
+                    subtitle = stringResource(R.string.about_subtitle),
                     onClick  = onAbout
                 )
             }
@@ -356,14 +446,14 @@ fun ThemePickerGrid(context: Context) {
     val isDark = forceDark ?: isSystemInDarkTheme()
 
     val presets = listOf(
-        Triple(AuralisPreset.DYNAMIC, artworkPrimary, "跟随专辑封面"),
-        Triple(AuralisPreset.OBSIDIAN, Color(0xFFE2E2E2), "近 AMOLED 纯黑"),
-        Triple(AuralisPreset.MIDNIGHT, Color(0xFF7EB8F7), "深邃海军蓝"),
-        Triple(AuralisPreset.AMBER, Color(0xFFFFB74D), "暖金深棕"),
-        Triple(AuralisPreset.ROSE, Color(0xFFF48FB1), "深玫红调"),
-        Triple(AuralisPreset.AURORA, Color(0xFF69F0AE), "极光绿意"),
-        Triple(AuralisPreset.VIOLET, Color(0xFFCE93D8), "梦幻烟紫"),
-        Triple(AuralisPreset.SOLAR, Color(0xFFFFF176), "正午金辉")
+        Triple(AuralisPreset.DYNAMIC, artworkPrimary, stringResource(R.string.theme_dynamic_cover)),
+        Triple(AuralisPreset.OBSIDIAN, Color(0xFFE2E2E2), stringResource(R.string.theme_obsidian)),
+        Triple(AuralisPreset.MIDNIGHT, Color(0xFF7EB8F7), stringResource(R.string.theme_midnight)),
+        Triple(AuralisPreset.AMBER, Color(0xFFFFB74D), stringResource(R.string.theme_amber)),
+        Triple(AuralisPreset.ROSE, Color(0xFFF48FB1), stringResource(R.string.theme_rose)),
+        Triple(AuralisPreset.AURORA, Color(0xFF69F0AE), stringResource(R.string.theme_aurora)),
+        Triple(AuralisPreset.VIOLET, Color(0xFFCE93D8), stringResource(R.string.theme_violet)),
+        Triple(AuralisPreset.SOLAR, Color(0xFFFFF176), stringResource(R.string.theme_solar))
     )
 
     val rows = presets.chunked(2)
@@ -383,6 +473,30 @@ fun ThemePickerGrid(context: Context) {
 }
 
 @Composable
+private fun backgroundModeDisplayName(mode: BackgroundMode): String = when (mode) {
+    BackgroundMode.STATIC     -> stringResource(R.string.bgmode_static)
+    BackgroundMode.BREATHING  -> stringResource(R.string.bgmode_breathing)
+    BackgroundMode.FLUID      -> stringResource(R.string.bgmode_fluid)
+    BackgroundMode.HORIZON    -> stringResource(R.string.bgmode_horizon)
+    BackgroundMode.CLASSIC_EQ -> stringResource(R.string.bgmode_classic_eq)
+    BackgroundMode.STARDUST   -> stringResource(R.string.bgmode_stardust)
+}
+
+@Composable
+private fun presetDisplayName(preset: AuralisPreset): String = when (preset) {
+    AuralisPreset.DYNAMIC  -> stringResource(R.string.preset_name_dynamic)
+    AuralisPreset.OBSIDIAN -> stringResource(R.string.preset_name_obsidian)
+    AuralisPreset.MIDNIGHT -> stringResource(R.string.preset_name_midnight)
+    AuralisPreset.AMBER    -> stringResource(R.string.preset_name_amber)
+    AuralisPreset.ROSE     -> stringResource(R.string.preset_name_rose)
+    AuralisPreset.JADE     -> stringResource(R.string.preset_name_jade)
+    AuralisPreset.AURORA   -> stringResource(R.string.preset_name_aurora)
+    AuralisPreset.VIOLET   -> stringResource(R.string.preset_name_violet)
+    AuralisPreset.SOLAR    -> stringResource(R.string.preset_name_solar)
+    AuralisPreset.CUSTOM   -> stringResource(R.string.preset_name_custom)
+}
+
+@Composable
 private fun ThemePresetCard(
     preset: AuralisPreset, accentColor: Color, subtitle: String, artworkPrimary: Color, customHue: Float, isDark: Boolean, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier
 ) {
@@ -398,7 +512,7 @@ private fun ThemePresetCard(
                 if (isSelected) { Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp), tint = accentColor) }
             }
             Spacer(Modifier.height(8.dp))
-            Text(preset.label, style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal, color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface)
+            Text(presetDisplayName(preset), style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal, color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
         }
     }

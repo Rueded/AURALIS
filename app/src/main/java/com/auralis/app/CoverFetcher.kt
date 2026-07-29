@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
@@ -35,18 +36,28 @@ object CoverFetcher {
     private const val PC_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-    // ✅ 与 NeteaseLyricsFetcher 完全对齐的网易云请求方法
-    // appver=3.0.1，去掉 channel=netease，已验证可绕过反爬
-    private fun makeNeteaseRequest(url: String): String? {
+    private fun makeNeteaseRequest(context: Context, url: String): String? {
+        // 读取用户可能在设置中填写的自定义真实 Cookie
+        val prefs = context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+        val customCookie = prefs.getString("netease_custom_cookie", "")
+
+        // 动态指纹：每次请求伪造全新的设备 ID
+        val randomDeviceId = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
+        val defaultCookie = "os=pc; osver=Microsoft-Windows-10-Professional-build-19045-64bit; appver=3.0.1; deviceId=$randomDeviceId; _ntes_nuid=$randomDeviceId"
+
+        val finalCookie = if (!customCookie.isNullOrBlank()) customCookie else defaultCookie
+
+        // 动态 IP：随机伪造国内 IP 地址，防止单 IP 高频访问被拦截
+        val randomIp = "114.114.${(1..254).random()}.${(1..254).random()}"
+
         return try {
             val req = Request.Builder()
                 .url(url)
                 .addHeader("User-Agent", PC_UA)
                 .addHeader("Referer", "https://music.163.com/")
-                .addHeader(
-                    "Cookie",
-                    "os=pc; osver=Microsoft-Windows-10-Professional-build-19045-64bit; appver=3.0.1"
-                )
+                .addHeader("Cookie", finalCookie)
+                .addHeader("X-Real-IP", randomIp)
+                .addHeader("X-Forwarded-For", randomIp)
                 .build()
             val response = client.newCall(req).execute()
             if (response.isSuccessful) response.body?.string() else null
@@ -83,12 +94,10 @@ object CoverFetcher {
         return titleMatch && artistMatch
     }
 
-    // ✅ 新增：从网易云歌曲详情接口获取专辑高清封面
-    // 当搜索结果的 picUrl 不可用时作为补充
-    private fun fetchNeteaseAlbumCoverById(songId: Long): String? {
+    private fun fetchNeteaseAlbumCoverById(context: Context, songId: Long): String? {
         return try {
             val detailUrl = "https://music.163.com/api/song/detail?ids=[$songId]"
-            val body = makeNeteaseRequest(detailUrl) ?: return null
+            val body = makeNeteaseRequest(context, detailUrl) ?: return null
             val json = JSONObject(body)
             val songs = json.optJSONArray("songs") ?: return null
             if (songs.length() == 0) return null
@@ -102,23 +111,16 @@ object CoverFetcher {
         }
     }
 
-    /**
-     * 智能获取高清封面：网易云第一优先（与歌词接口完全一致请求方式）→ QQ音乐 → 其他
-     */
-    suspend fun fetchHighResCover(title: String, artist: String): Bitmap? =
+    suspend fun fetchHighResCover(context: Context, title: String, artist: String): Bitmap? =
         withContext(Dispatchers.IO) {
             val keyword = buildKeyword(title, artist)
 
-            // ========== 🏆 第一优先：网易云（与 NeteaseLyricsFetcher 完全一致） ==========
+            // 第一优先：网易云
             try {
-                val searchUrl =
-                    "https://music.163.com/api/search/get?s=${URLEncoder.encode(keyword, "UTF-8")}&type=1&limit=10"
-                val body = makeNeteaseRequest(searchUrl)
+                val searchUrl = "https://music.163.com/api/search/get?s=${URLEncoder.encode(keyword, "UTF-8")}&type=1&limit=10"
+                val body = makeNeteaseRequest(context, searchUrl)
                 if (body != null) {
-                    val songs = JSONObject(body)
-                        .optJSONObject("result")
-                        ?.optJSONArray("songs")
-
+                    val songs = JSONObject(body).optJSONObject("result")?.optJSONArray("songs")
                     if (songs != null) {
                         for (i in 0 until songs.length()) {
                             val song = songs.getJSONObject(i)
@@ -133,32 +135,18 @@ object CoverFetcher {
                                 val albumObj = song.optJSONObject("album")
                                 var picUrl = albumObj?.optString("picUrl")
 
-                                // ✅ picUrl 协议修正 + 分辨率参数
                                 if (!picUrl.isNullOrEmpty()) {
-                                    if (picUrl.startsWith("http://")) {
-                                        picUrl = picUrl.replace("http://", "https://")
-                                    }
-                                    picUrl = if (picUrl.contains("?")) {
-                                        "$picUrl&param=800y800"
-                                    } else {
-                                        "$picUrl?param=800y800"
-                                    }
+                                    if (picUrl.startsWith("http://")) picUrl = picUrl.replace("http://", "https://")
+                                    picUrl = if (picUrl.contains("?")) "$picUrl&param=800y800" else "$picUrl?param=800y800"
                                     val bitmap = downloadBitmap(picUrl)
-                                    if (bitmap != null) {
-                                        Log.d(TAG, "✅ 网易云搜索封面成功（$trackName）")
-                                        return@withContext bitmap
-                                    }
+                                    if (bitmap != null) return@withContext bitmap
                                 }
 
-                                // ✅ 如果 picUrl 下载失败，用 song detail 接口再试一次
                                 if (songId > 0) {
-                                    val detailUrl = fetchNeteaseAlbumCoverById(songId)
+                                    val detailUrl = fetchNeteaseAlbumCoverById(context, songId)
                                     if (detailUrl != null) {
                                         val bitmap = downloadBitmap(detailUrl)
-                                        if (bitmap != null) {
-                                            Log.d(TAG, "✅ 网易云详情接口封面成功（id=$songId）")
-                                            return@withContext bitmap
-                                        }
+                                        if (bitmap != null) return@withContext bitmap
                                     }
                                 }
                             }
@@ -169,10 +157,9 @@ object CoverFetcher {
                 Log.w(TAG, "网易云封面检索异常: ${e.message}")
             }
 
-            // ========== 🥈 第二优先：QQ音乐 ==========
+            // 第二优先：QQ音乐
             try {
-                val qqUrl =
-                    "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${URLEncoder.encode(keyword, "UTF-8")}&p=1&n=5&format=json"
+                val qqUrl = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${URLEncoder.encode(keyword, "UTF-8")}&p=1&n=5&format=json"
                 val req = Request.Builder()
                     .url(qqUrl)
                     .addHeader("User-Agent", PC_UA)
@@ -180,39 +167,28 @@ object CoverFetcher {
                     .build()
                 val body = client.newCall(req).execute().body?.string()
                 if (body != null) {
-                    val list = JSONObject(body)
-                        .optJSONObject("data")
-                        ?.optJSONObject("song")
-                        ?.optJSONArray("list")
+                    val list = JSONObject(body).optJSONObject("data")?.optJSONObject("song")?.optJSONArray("list")
                     if (list != null) {
                         for (i in 0 until list.length()) {
                             val song = list.getJSONObject(i)
                             val trackName = song.optString("songname")
-                            val artistName =
-                                song.optJSONArray("singer")?.optJSONObject(0)?.optString("name") ?: ""
+                            val artistName = song.optJSONArray("singer")?.optJSONObject(0)?.optString("name") ?: ""
                             if (isMatch(title, artist, trackName, artistName)) {
                                 val albumId = song.optString("albummid")
                                 if (albumId.isNotEmpty()) {
-                                    val imgUrl =
-                                        "https://y.gtimg.cn/music/photo_new/T002R500x500M000$albumId.jpg"
+                                    val imgUrl = "https://y.gtimg.cn/music/photo_new/T002R500x500M000$albumId.jpg"
                                     val bitmap = downloadBitmap(imgUrl)
-                                    if (bitmap != null) {
-                                        Log.d(TAG, "✅ QQ音乐封面成功（$trackName）")
-                                        return@withContext bitmap
-                                    }
+                                    if (bitmap != null) return@withContext bitmap
                                 }
                             }
                         }
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "QQ音乐封面检索失败: ${e.message}")
-            }
+            } catch (e: Exception) {}
 
-            // ========== 🥉 第三：iTunes ==========
+            // 第三：iTunes
             try {
-                val itunesUrl =
-                    "https://itunes.apple.com/search?term=${URLEncoder.encode(keyword, "UTF-8")}&media=music&entity=song&limit=5"
+                val itunesUrl = "https://itunes.apple.com/search?term=${URLEncoder.encode(keyword, "UTF-8")}&media=music&entity=song&limit=5"
                 val req = Request.Builder().url(itunesUrl).build()
                 val body = client.newCall(req).execute().body?.string()
                 if (body != null) {
@@ -234,10 +210,9 @@ object CoverFetcher {
                 }
             } catch (e: Exception) {}
 
-            // ========== 4️⃣ 第四：Deezer ==========
+            // 第四：Deezer
             try {
-                val deezerUrl =
-                    "https://api.deezer.com/search?q=${URLEncoder.encode(keyword, "UTF-8")}&limit=5"
+                val deezerUrl = "https://api.deezer.com/search?q=${URLEncoder.encode(keyword, "UTF-8")}&limit=5"
                 val req = Request.Builder().url(deezerUrl).build()
                 val body = client.newCall(req).execute().body?.string()
                 if (body != null) {
@@ -245,12 +220,7 @@ object CoverFetcher {
                     if (data != null) {
                         for (i in 0 until data.length()) {
                             val item = data.getJSONObject(i)
-                            if (isMatch(
-                                    title, artist,
-                                    item.optString("title"),
-                                    item.optJSONObject("artist")?.optString("name") ?: ""
-                                )
-                            ) {
+                            if (isMatch(title, artist, item.optString("title"), item.optJSONObject("artist")?.optString("name") ?: "")) {
                                 val coverXl = item.optJSONObject("album")?.optString("cover_xl")
                                 if (!coverXl.isNullOrEmpty()) {
                                     val bitmap = downloadBitmap(coverXl)
@@ -262,36 +232,10 @@ object CoverFetcher {
                 }
             } catch (e: Exception) {}
 
-            // ========== 5️⃣ 第五：MusicBrainz ==========
-            try {
-                val mbUrl =
-                    "https://musicbrainz.org/ws/2/recording/?query=${URLEncoder.encode(keyword, "UTF-8")}&limit=5&fmt=json"
-                val req = Request.Builder()
-                    .url(mbUrl)
-                    .addHeader("User-Agent", "Auralis/1.0 (auralis_dev@gmail.com)")
-                    .build()
-                val body = client.newCall(req).execute().body?.string()
-                if (body != null) {
-                    val recordings = JSONObject(body).optJSONArray("recordings")
-                    if (recordings != null && recordings.length() > 0) {
-                        val releaseId = recordings.optJSONObject(0)
-                            ?.optJSONArray("releases")
-                            ?.optJSONObject(0)
-                            ?.optString("id")
-                        if (!releaseId.isNullOrEmpty()) {
-                            val bitmap =
-                                downloadBitmap("https://coverartarchive.org/release/$releaseId/front-500")
-                            if (bitmap != null) return@withContext bitmap
-                        }
-                    }
-                }
-            } catch (e: Exception) {}
-
-            Log.d(TAG, "❌ 所有封面源均无匹配")
             null
         }
 
-    suspend fun searchCoverCandidates(title: String, artist: String): List<CoverCandidate> =
+    suspend fun searchCoverCandidates(context: Context, title: String, artist: String): List<CoverCandidate> =
         coroutineScope {
             val keyword = buildKeyword(title, artist)
             val encodedKw = URLEncoder.encode(keyword, "UTF-8")
@@ -299,16 +243,14 @@ object CoverFetcher {
             val deferredQQ = async(Dispatchers.IO) {
                 val candidates = mutableListOf<CoverCandidate>()
                 try {
-                    val url =
-                        "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=$encodedKw&p=1&n=5&format=json"
+                    val url = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=$encodedKw&p=1&n=5&format=json"
                     val req = Request.Builder().url(url)
                         .addHeader("User-Agent", PC_UA)
                         .addHeader("Cookie", "pgv_pvi=22038528; pgv_si=s3156287488; os_name=windows;")
                         .build()
                     val body = client.newCall(req).execute().body?.string()
                     if (body != null) {
-                        val list = JSONObject(body)
-                            .optJSONObject("data")?.optJSONObject("song")?.optJSONArray("list")
+                        val list = JSONObject(body).optJSONObject("data")?.optJSONObject("song")?.optJSONArray("list")
                         if (list != null) {
                             for (i in 0 until list.length()) {
                                 val song = list.getJSONObject(i)
@@ -317,8 +259,7 @@ object CoverFetcher {
                                     candidates.add(
                                         CoverCandidate(
                                             title = song.optString("songname"),
-                                            artist = song.optJSONArray("singer")?.optJSONObject(0)
-                                                ?.optString("name") ?: "",
+                                            artist = song.optJSONArray("singer")?.optJSONObject(0)?.optString("name") ?: "",
                                             album = song.optString("albumname"),
                                             imageUrl = "https://y.gtimg.cn/music/photo_new/T002R500x500M000$albumId.jpg",
                                             platform = "QQ音乐"
@@ -332,47 +273,31 @@ object CoverFetcher {
                 candidates
             }
 
-            // ✅ 候选列表的网易云查询也统一到新的 makeNeteaseRequest
             val deferredNetease = async(Dispatchers.IO) {
                 val candidates = mutableListOf<CoverCandidate>()
                 try {
-                    val url =
-                        "https://music.163.com/api/search/get?s=$encodedKw&type=1&limit=10"
-                    val body = makeNeteaseRequest(url)
+                    val url = "https://music.163.com/api/search/get?s=$encodedKw&type=1&limit=10"
+                    val body = makeNeteaseRequest(context, url)
                     if (body != null) {
                         val songs = JSONObject(body).optJSONObject("result")?.optJSONArray("songs")
                         if (songs != null) {
                             for (i in 0 until songs.length()) {
                                 val song = songs.getJSONObject(i)
                                 val t = song.optString("name")
-                                val a = song.optJSONArray("artists")?.optJSONObject(0)
-                                    ?.optString("name") ?: ""
+                                val a = song.optJSONArray("artists")?.optJSONObject(0)?.optString("name") ?: ""
                                 val albumObj = song.optJSONObject("album")
                                 val songId = song.optLong("id")
                                 var picUrl = albumObj?.optString("picUrl")
 
-// ✅ 关键兜底：search 接口返回的 picUrl 有时为空，用 detail 接口补全
                                 if (picUrl.isNullOrEmpty() && songId > 0) {
-                                    picUrl = fetchNeteaseAlbumCoverById(songId)
+                                    picUrl = fetchNeteaseAlbumCoverById(context, songId)
                                 }
 
                                 if (!picUrl.isNullOrEmpty()) {
-                                    if (picUrl.startsWith("http://")) {
-                                        picUrl = picUrl.replace("http://", "https://")
-                                    }
-                                    picUrl = if (picUrl.contains("?")) {
-                                        "$picUrl&param=500y500"
-                                    } else {
-                                        "$picUrl?param=500y500"
-                                    }
+                                    if (picUrl.startsWith("http://")) picUrl = picUrl.replace("http://", "https://")
+                                    picUrl = if (picUrl.contains("?")) "$picUrl&param=500y500" else "$picUrl?param=500y500"
                                     candidates.add(
-                                        CoverCandidate(
-                                            title = t,
-                                            artist = a,
-                                            album = albumObj?.optString("name") ?: "",
-                                            imageUrl = picUrl,
-                                            platform = "网易云"
-                                        )
+                                        CoverCandidate(title = t, artist = a, album = albumObj?.optString("name") ?: "", imageUrl = picUrl, platform = "网易云")
                                     )
                                 }
                             }
@@ -385,8 +310,7 @@ object CoverFetcher {
             val deferredItunes = async(Dispatchers.IO) {
                 val candidates = mutableListOf<CoverCandidate>()
                 try {
-                    val url =
-                        "https://itunes.apple.com/search?term=$encodedKw&media=music&entity=song&limit=5"
+                    val url = "https://itunes.apple.com/search?term=$encodedKw&media=music&entity=song&limit=5"
                     val req = Request.Builder().url(url).build()
                     val body = client.newCall(req).execute().body?.string()
                     if (body != null) {
@@ -398,11 +322,8 @@ object CoverFetcher {
                                 if (artwork100.isNotEmpty()) {
                                     candidates.add(
                                         CoverCandidate(
-                                            title = item.optString("trackName"),
-                                            artist = item.optString("artistName"),
-                                            album = item.optString("collectionName"),
-                                            imageUrl = artwork100.replace("100x100bb", "800x800bb"),
-                                            platform = "iTunes"
+                                            title = item.optString("trackName"), artist = item.optString("artistName"),
+                                            album = item.optString("collectionName"), imageUrl = artwork100.replace("100x100bb", "800x800bb"), platform = "iTunes"
                                         )
                                     )
                                 }
@@ -425,16 +346,12 @@ object CoverFetcher {
                             for (i in 0 until data.length()) {
                                 val item = data.getJSONObject(i)
                                 val albumObj = item.optJSONObject("album")
-                                val cover = albumObj?.optString("cover_xl")
-                                    ?: albumObj?.optString("cover_big")
+                                val cover = albumObj?.optString("cover_xl") ?: albumObj?.optString("cover_big")
                                 if (!cover.isNullOrEmpty()) {
                                     candidates.add(
                                         CoverCandidate(
-                                            title = item.optString("title"),
-                                            artist = item.optJSONObject("artist")?.optString("name") ?: "",
-                                            album = albumObj?.optString("title") ?: "",
-                                            imageUrl = cover,
-                                            platform = "Deezer"
+                                            title = item.optString("title"), artist = item.optJSONObject("artist")?.optString("name") ?: "",
+                                            album = albumObj?.optString("title") ?: "", imageUrl = cover, platform = "Deezer"
                                         )
                                     )
                                 }

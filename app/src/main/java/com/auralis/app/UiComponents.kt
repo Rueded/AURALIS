@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -201,7 +202,7 @@ fun PremiumMiniPlayerBar(
                 if (coverBitmap != null) {
                     Image(
                         bitmap = coverBitmap,
-                        contentDescription = "封面",
+                        contentDescription = stringResource(R.string.content_desc_cover),
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -257,7 +258,7 @@ fun PremiumMiniPlayerBar(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 )
             ) {
-                Icon(Icons.Filled.SkipPrevious, "上一首", modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.SkipPrevious, stringResource(R.string.content_desc_previous), modifier = Modifier.size(22.dp))
             }
 
             FilledIconButton(
@@ -267,7 +268,7 @@ fun PremiumMiniPlayerBar(
             ) {
                 Icon(
                     if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    "播放/暂停",
+                    stringResource(R.string.content_desc_play_pause),
                     modifier = Modifier.size(26.dp),
                     tint = MaterialTheme.colorScheme.onPrimary
                 )
@@ -280,7 +281,7 @@ fun PremiumMiniPlayerBar(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 )
             ) {
-                Icon(Icons.Filled.SkipNext, "下一首", modifier = Modifier.size(22.dp))
+                Icon(Icons.Filled.SkipNext, stringResource(R.string.content_desc_next), modifier = Modifier.size(22.dp))
             }
         }
         }
@@ -401,7 +402,7 @@ fun TopSongRow(
                     color = if (isCurrentSong) primary else Color.Unspecified
                 )
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                val dateStr = if (song.lastPlayed > 0) sdf.format(java.util.Date(song.lastPlayed)) else "从未"
+                val dateStr = if (song.lastPlayed > 0) sdf.format(java.util.Date(song.lastPlayed)) else stringResource(R.string.never_played_short)
                 Text(
                     "${song.artist} · $dateStr",
                     style = MaterialTheme.typography.bodySmall,
@@ -415,7 +416,7 @@ fun TopSongRow(
                 color = primary.copy(alpha = 0.15f)
             ) {
                 Text(
-                    "${song.playCount} 次",
+                    stringResource(R.string.play_count_times, song.playCount),
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = primary,
@@ -470,7 +471,7 @@ fun AlbumRow(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(albumName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("$artistName · $songCount 首歌曲", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.song_count_with_artist, artistName, songCount), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
@@ -520,7 +521,7 @@ fun ArtistRow(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(artistName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("$songCount 首歌曲", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.song_count_songs_suffix, songCount), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
@@ -566,7 +567,7 @@ fun PlaylistRow(
             }
             if (onDelete != null) {
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Outlined.DeleteOutline, "删除", tint = MaterialTheme.colorScheme.outline)
+                    Icon(Icons.Outlined.DeleteOutline, stringResource(R.string.action_delete), tint = MaterialTheme.colorScheme.outline)
                 }
             } else {
                 Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
@@ -603,9 +604,9 @@ fun ListeningStatsBanner(
             }
             Spacer(Modifier.width(16.dp))
             Column {
-                Text("听歌大数据", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.listening_stats_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "累计 $totalPlays 次 · $uniqueSongs 首心头好",
+                    stringResource(R.string.listening_stats_summary, totalPlays, uniqueSongs),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -636,14 +637,14 @@ fun SleepTimerBanner(
             Icon(Icons.Filled.NightsStay, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
             Spacer(Modifier.width(10.dp))
             Text(
-                "${secondsRemaining / 60}:${String.format("%02d", secondsRemaining % 60)} 后暂停",
+                stringResource(R.string.pause_in_label, "${secondsRemaining / 60}:${String.format("%02d", secondsRemaining % 60)}"),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 modifier = Modifier.weight(1f)
             )
             TextButton(onClick = onCancel, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                Text("取消", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.action_cancel), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -687,7 +688,7 @@ fun GlowPlayButton(
         ) {
             Icon(
                 if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                "播放/暂停",
+                stringResource(R.string.content_desc_play_pause),
                 modifier = Modifier.size(iconSize),
                 tint = onPrimary
             )
@@ -706,15 +707,15 @@ fun SettingsHeroTopBar(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Filled.ArrowBack, "返回")
+                    Icon(Icons.Filled.ArrowBack, stringResource(R.string.action_back))
                 }
                 Spacer(Modifier.weight(1f))
             }
             Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
-                Text("设置", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "主题、音质、曲库与同步",
+                    stringResource(R.string.settings_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

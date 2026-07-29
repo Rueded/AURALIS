@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -46,7 +47,8 @@ private data class HistoryPageState(
     val topSongs: List<Song> = emptyList(),
     val totalPlays: Int = 0,
     val totalListenedMs: Long = 0L,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val sortByRecent: Boolean = false    // false = 按次数（原本行为），true = 按最近播放时间
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -65,8 +67,8 @@ fun HistoryScreen(onBack: () -> Unit) {
         state = loadYears(context, state)
     }
 
-    // 年份或月份变化时重新加载数据
-    LaunchedEffect(state.selectedYear, state.selectedMonth) {
+    // 年份、月份或排序方式变化时重新加载数据
+    LaunchedEffect(state.selectedYear, state.selectedMonth, state.sortByRecent) {
         if (state.selectedYear.isNotEmpty()) {
             state = state.copy(isLoading = true)
             state = loadPeriodData(context, state)
@@ -76,10 +78,10 @@ fun HistoryScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("收听足迹", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.tab_history), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -144,11 +146,29 @@ fun HistoryScreen(onBack: () -> Unit) {
                 // Top 歌曲
                 if (state.topSongs.isNotEmpty()) {
                     item {
-                        Text(
-                            text = if (state.selectedMonth == 0) "本年最爱" else "本月最爱",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (state.selectedMonth == 0) stringResource(R.string.this_year_favorite) else stringResource(R.string.this_month_favorite),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilterChip(
+                                    selected = !state.sortByRecent,
+                                    onClick = { state = state.copy(sortByRecent = false) },
+                                    label = { Text(stringResource(R.string.sort_by_count), fontSize = 12.sp) }
+                                )
+                                FilterChip(
+                                    selected = state.sortByRecent,
+                                    onClick = { state = state.copy(sortByRecent = true) },
+                                    label = { Text(stringResource(R.string.sort_by_recent), fontSize = 12.sp) }
+                                )
+                            }
+                        }
                     }
                     items(state.topSongs) { song ->
                         TopSongRow(
@@ -198,7 +218,8 @@ private suspend fun loadPeriodData(context: Context, state: HistoryPageState): H
             }.timeInMillis
 
             val monthly = dao.getMonthlyPlayCounts(yearStart, yearEnd)
-            val top = dao.getTopSongsInPeriod(yearStart, yearEnd, 10)
+            val top = if (state.sortByRecent) dao.getRecentSongsInPeriod(yearStart, yearEnd, 10)
+                      else dao.getTopSongsInPeriod(yearStart, yearEnd, 10)
             val total = dao.getTotalPlaysInYear(yearStart, yearEnd)
             val totalMs = dao.getTotalListenedMs() ?: 0L
 
@@ -220,7 +241,8 @@ private suspend fun loadPeriodData(context: Context, state: HistoryPageState): H
             }.timeInMillis
 
             val daily = dao.getDailyPlayCounts(monthStart, monthEnd)
-            val top = dao.getTopSongsInPeriod(monthStart, monthEnd, 10)
+            val top = if (state.sortByRecent) dao.getRecentSongsInPeriod(monthStart, monthEnd, 10)
+                      else dao.getTopSongsInPeriod(monthStart, monthEnd, 10)
             val total = dao.getPlayCountInPeriod(monthStart, monthEnd)
 
             state.copy(
@@ -247,8 +269,13 @@ private fun YearMonthSelector(
     onMonthSelected: (Int) -> Unit
 ) {
     var showYearDropdown by remember { mutableStateOf(false) }
-    val monthLabels = listOf("全年", "1月", "2月", "3月", "4月", "5月", "6月",
-        "7月", "8月", "9月", "10月", "11月", "12月")
+    val monthLabels = listOf(
+        stringResource(R.string.month_all_year), stringResource(R.string.month_1), stringResource(R.string.month_2),
+        stringResource(R.string.month_3), stringResource(R.string.month_4), stringResource(R.string.month_5),
+        stringResource(R.string.month_6), stringResource(R.string.month_7), stringResource(R.string.month_8),
+        stringResource(R.string.month_9), stringResource(R.string.month_10), stringResource(R.string.month_11),
+        stringResource(R.string.month_12)
+    )
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // 年份选择
@@ -305,15 +332,15 @@ private fun SummaryCard(totalPlays: Int, totalListenedMs: Long, selectedMonth: I
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             SummaryStatItem(
-                label = if (selectedMonth == 0) "今年播放" else "本月播放",
-                value = "$totalPlays 次"
+                label = if (selectedMonth == 0) stringResource(R.string.plays_this_year) else stringResource(R.string.plays_this_month),
+                value = stringResource(R.string.plays_count_label, totalPlays)
             )
             Divider(
                 modifier = Modifier.height(40.dp).width(1.dp).align(Alignment.CenterVertically),
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
             )
             SummaryStatItem(
-                label = "累计收听",
+                label = stringResource(R.string.total_listening_label),
                 value = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
             )
         }
@@ -356,7 +383,7 @@ private fun MonthlyBarChart(data: List<MonthCount>, selectedYear: String) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "$selectedYear 年播放分布",
+                stringResource(R.string.year_play_distribution, selectedYear),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold
             )
@@ -400,7 +427,7 @@ private fun DailyBarChart(data: List<DayCount>, year: String, month: Int) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "$year 年 ${month}月 每日播放",
+                stringResource(R.string.month_daily_plays, year, month),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold
             )
@@ -574,7 +601,7 @@ private fun TopSongRow(song: Song, rank: Int, context: Context) {
         }
 
         Text(
-            text = "${song.playCount}次",
+            text = stringResource(R.string.play_count_suffix, song.playCount),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold
@@ -596,13 +623,13 @@ private fun EmptyHistoryPlaceholder(modifier: Modifier = Modifier) {
         Text("🎵", fontSize = 48.sp)
         Spacer(Modifier.height(12.dp))
         Text(
-            "还没有收听记录",
+            stringResource(R.string.no_listening_history),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "播放一些歌曲后再来看看",
+            stringResource(R.string.play_some_songs_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )

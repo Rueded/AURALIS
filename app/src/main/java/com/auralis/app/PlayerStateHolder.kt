@@ -42,6 +42,34 @@ object PlayerStateHolder {
     private val _openPlayerRequest = MutableStateFlow(false)
     val openPlayerRequest: StateFlow<Boolean> = _openPlayerRequest.asStateFlow()
 
+    // 👇 悬浮歌词 overlay 用：全局共享一份当前歌曲的歌词行，
+    // 这样不用打开全屏播放器也能在小窗里跟着走词。
+    private val _lrcLines = MutableStateFlow<List<LrcLine>>(emptyList())
+    val lrcLines: StateFlow<List<LrcLine>> = _lrcLines.asStateFlow()
+
+    private val _lrcLoadedForPath = MutableStateFlow("")
+    val lrcLoadedForPath: StateFlow<String> = _lrcLoadedForPath.asStateFlow()
+
+    /** 歌词解析完成后调用（全屏播放器和悬浮 overlay 都可以调这个，谁先加载到就先用谁的）。 */
+    fun updateLyrics(audioPath: String, lines: List<LrcLine>) {
+        _lrcLoadedForPath.value = audioPath
+        _lrcLines.value = lines
+    }
+
+    fun clearLyrics() {
+        _lrcLoadedForPath.value = ""
+        _lrcLines.value = emptyList()
+    }
+
+    // 悬浮歌词开关：用 StateFlow 而不是各处各自读一份 SharedPreferences，
+    // 这样设置页里一切换，迷你播放条马上就能感知到，不用等 App 重启或界面重新创建。
+    private val _lyricsOverlayEnabled = MutableStateFlow(true)
+    val lyricsOverlayEnabled: StateFlow<Boolean> = _lyricsOverlayEnabled.asStateFlow()
+
+    fun setLyricsOverlayEnabled(enabled: Boolean) {
+        _lyricsOverlayEnabled.value = enabled
+    }
+
     fun requestOpenPlayer() {
         _openPlayerRequest.value = true
     }
@@ -93,6 +121,7 @@ object PlayerStateHolder {
         _coverBitmap.value = null
         _dominantColor.value = null
         _albumPalette.value = null
+        clearLyrics()
     }
 
     private suspend fun applyBitmap(bitmap: Bitmap, audioPath: String) {

@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -87,7 +88,7 @@ fun HomeHeader(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "首曲目",
+                        stringResource(R.string.first_track_label),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 5.dp)
@@ -99,7 +100,7 @@ fun HomeHeader(
             Box {
                 IconButton(onClick = { expandedSort = true }) {
                     Icon(
-                        Icons.Filled.Sort, "排序",
+                        Icons.Filled.Sort, stringResource(R.string.action_sort),
                         tint = if (expandedSort) primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -114,7 +115,7 @@ fun HomeHeader(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                if (isAscending) "A-Z / 升序排列" else "Z-A / 降序排列",
+                                if (isAscending) stringResource(R.string.sort_ascending_az) else stringResource(R.string.sort_descending_za),
                                 color = primary,
                                 fontWeight = FontWeight.Bold
                             )
@@ -130,9 +131,9 @@ fun HomeHeader(
 
                     // 2. 下面是具体的排序选项
                     listOf(
-                        "Name" to "按名称",
-                        "Date" to "按日期",
-                        "Size" to "按大小"
+                        "Name" to stringResource(R.string.sort_by_name),
+                        "Date" to stringResource(R.string.sort_by_date),
+                        "Size" to stringResource(R.string.sort_by_size)
                     ).forEach { (type, label) ->
                         val selected = sortType == type
                         DropdownMenuItem(
@@ -160,7 +161,7 @@ fun HomeHeader(
 
             IconButton(onClick = onSettingsClick) {
                 Icon(
-                    Icons.Filled.Settings, "设置",
+                    Icons.Filled.Settings, stringResource(R.string.action_settings),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -170,7 +171,7 @@ fun HomeHeader(
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
-                Icon(Icons.Filled.Sync, "同步", modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Sync, stringResource(R.string.action_sync), modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(4.dp))
         }
@@ -181,14 +182,14 @@ fun HomeHeader(
             onValueChange = onSearchChange,
             placeholder = {
                 Text(
-                    "搜索歌名、歌手、格式…",
+                    stringResource(R.string.search_song_format_placeholder),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                 )
             },
             leadingIcon = {
                 Icon(
-                    Icons.Filled.Search, "搜索",
+                    Icons.Filled.Search, stringResource(R.string.action_search),
                     modifier = Modifier.size(20.dp),
                     tint = primary.copy(alpha = 0.85f)
                 )
@@ -196,7 +197,7 @@ fun HomeHeader(
             trailingIcon = if (searchQuery.isNotEmpty()) {
                 {
                     IconButton(onClick = { onSearchChange("") }) {
-                        Icon(Icons.Filled.Close, "清除", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.Close, stringResource(R.string.action_clear), modifier = Modifier.size(18.dp))
                     }
                 }
             } else null,
@@ -259,7 +260,7 @@ fun SongCoverThumb(
         if (bitmap != null) {
             Image(
                 bitmap = bitmap!!,
-                contentDescription = "封面",
+                contentDescription = stringResource(R.string.content_desc_cover),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
@@ -324,11 +325,11 @@ fun SongItemUI(
                     )
                     ins?.copyTo(out); ins?.close(); out.close()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "歌词导入成功！", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.lyrics_import_success), Toast.LENGTH_SHORT).show()
                     }
                 } catch (_: Exception) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "导入失败", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.import_failed), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -351,37 +352,37 @@ fun SongItemUI(
     // 菜单项（三点按钮和长按都用这个）
     val menuItems = @Composable {
         DropdownMenuItem(
-            text = { Text("下一首播放") },
+            text = { Text(stringResource(R.string.action_play_next)) },
             leadingIcon = { Icon(Icons.Filled.PlaylistPlay, null) },
             onClick = { closeAllMenus(); onPlayNext() }
         )
         DropdownMenuItem(
-            text = { Text("添加到歌单...") },
+            text = { Text(stringResource(R.string.action_add_to_playlist_ellipsis)) },
             leadingIcon = { Icon(Icons.Filled.PlaylistAdd, null) },
             onClick = { closeAllMenus(); onAddToPlaylist() }
         )
         if (onRemoveFromPlaylist != null) {
             DropdownMenuItem(
-                text = { Text("从歌单移除") },
+                text = { Text(stringResource(R.string.action_remove_from_playlist)) },
                 leadingIcon = { Icon(Icons.Filled.RemoveCircleOutline, null) },
                 onClick = { closeAllMenus(); onRemoveFromPlaylist() }
             )
         }
         DropdownMenuItem(
-            text = { Text("导入 LRC 歌词") },
+            text = { Text(stringResource(R.string.action_import_lrc_lyrics)) },
             leadingIcon = { Icon(Icons.Filled.Subtitles, null) },
             onClick = { closeAllMenus(); lrcPickerLauncher.launch("*/*") }
         )
         if (onShareToNearby != null) {
             DropdownMenuItem(
-                text = { Text("分享给附近设备") },
+                text = { Text(stringResource(R.string.share_to_nearby_device)) },
                 leadingIcon = { Icon(Icons.Filled.Wifi, null) },
                 onClick = { closeAllMenus(); onShareToNearby() }
             )
         }
         HorizontalDivider()
         DropdownMenuItem(
-            text = { Text("彻底删除文件", color = MaterialTheme.colorScheme.error) },
+            text = { Text(stringResource(R.string.action_delete_permanently), color = MaterialTheme.colorScheme.error) },
             leadingIcon = {
                 Icon(Icons.Filled.Delete, null,
                     tint = MaterialTheme.colorScheme.error)
@@ -529,7 +530,7 @@ fun SongItemUI(
             Box {
                 IconButton(onClick = { showButtonMenu = true }) {
                     Icon(
-                        Icons.Filled.MoreVert, "菜单",
+                        Icons.Filled.MoreVert, stringResource(R.string.menu_label),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
@@ -545,18 +546,18 @@ fun SongItemUI(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("确认删除") },
-            text = { Text("将彻底从手机存储中删除此文件，不可恢复。") },
+            title = { Text(stringResource(R.string.action_confirm_delete)) },
+            text = { Text(stringResource(R.string.confirm_delete_file_body)) },
             confirmButton = {
                 Button(
                     onClick = { showDeleteConfirm = false; onDelete() },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("删除") }
+                ) { Text(stringResource(R.string.action_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+                TextButton(onClick = { showDeleteConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }

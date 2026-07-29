@@ -48,6 +48,15 @@ import java.nio.ByteBuffer
 @UnstableApi
 class PlaybackService : MediaLibraryService() {
 
+    // Service 不受 MainActivity.attachBaseContext 影响（它是独立的组件，
+    // 不会因为 Activity.recreate() 就跟着重建）——Android Auto 浏览树标签、
+    // USB Bit-perfect/声学鉴定这些从 Service 里直接 getString(...) 出来的文案，
+    // 如果不在这里也做一次同样的 Context 包装，就会一直显示系统默认语言。
+    override fun attachBaseContext(newBase: Context) {
+        val lang = LocalizationManager.readSavedLanguage(newBase)
+        super.attachBaseContext(LocalizationManager.wrapContext(newBase, lang))
+    }
+
     // ─────────────────────────────────────────────────────────
     // Companion
     // ─────────────────────────────────────────────────────────
@@ -71,6 +80,14 @@ class PlaybackService : MediaLibraryService() {
         const val NODE_FAVORITES   = "node_favorites"
         const val NODE_RECENT      = "node_recent"
         const val NODE_PLAYLISTS   = "node_playlists"
+
+        // 播放队列/进度记忆（关 App 后恢复上次播放）
+        private const val PLAYBACK_STATE_PREFS = "PlaybackStatePrefs"
+        private const val KEY_QUEUE_PATHS = "queue_paths"       // JSON array of song.data 路径，按队列顺序
+        private const val KEY_QUEUE_INDEX = "queue_index"       // 当前播放到第几首（对应上面数组的下标）
+        private const val KEY_QUEUE_POSITION_MS = "queue_position_ms"
+        private const val KEY_SHUFFLE_ENABLED = "queue_shuffle_enabled"
+        private const val KEY_REPEAT_MODE = "queue_repeat_mode"
     }
 
     // ─────────────────────────────────────────────────────────
@@ -128,7 +145,7 @@ class PlaybackService : MediaLibraryService() {
                     .setEnableFloatOutput(true)
                     .setEnableAudioTrackPlaybackParams(true)
                     .build()
-                return VisualizerInterceptingAudioSink(originalSink)
+                return VisualizerInterceptingAudioSink(originalSink, context)
             }
         }
 
@@ -153,6 +170,16 @@ class PlaybackService : MediaLibraryService() {
                 audioSessionId = sessionId
                 _audioSessionIdState.value = sessionId
                 initEqualizer(sessionId) // ✅ EQ 跟随 session 重绑
+            }
+
+            // 暂停、切歌时顺手保存一次现场：onDestroy/onTaskRemoved 不一定总会被系统调用到，
+            // 这里多存几次是廉价操作（SharedPreferences 小 JSON），换来更保险的“记忆”体验。
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) savePlaybackState()
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                savePlaybackState()
             }
         })
         player2?.addListener(object : Player.Listener {
@@ -207,11 +234,22 @@ class PlaybackService : MediaLibraryService() {
         setMediaNotificationProvider(notificationProvider)
 
         crossfadeHandler.post(crossfadeCheckRunnable)
+
+        // 恢复上次关闭前的播放队列/进度
+        restorePlaybackState()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 用户从最近任务里划掉 App 时，onDestroy 不一定会被系统立刻调用，
+        // 这里兜底先把当前队列/进度存一份，防止真被系统回收时丢状态。
+        savePlaybackState()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        savePlaybackState()
         instance = null
         crossfadeHandler.removeCallbacks(crossfadeCheckRunnable)
         tryDisableUsbBitPerfect()
@@ -295,10 +333,10 @@ class PlaybackService : MediaLibraryService() {
     // ─────────────────────────────────────────────────────────
 
     private fun buildRootChildren(): List<MediaItem> = listOf(
-        buildBrowsableItem(NODE_ALL,       "全部歌曲",    null),
-        buildBrowsableItem(NODE_FAVORITES, "❤️ 红心收藏",  null),
-        buildBrowsableItem(NODE_RECENT,    "最近常听",    null),
-        buildBrowsableItem(NODE_PLAYLISTS, "我的歌单",    null)
+        buildBrowsableItem(NODE_ALL,       getString(R.string.tab_all_songs),    null),
+        buildBrowsableItem(NODE_FAVORITES, getString(R.string.browse_favorites),  null),
+        buildBrowsableItem(NODE_RECENT,    getString(R.string.tab_recent),    null),
+        buildBrowsableItem(NODE_PLAYLISTS, getString(R.string.tab_playlists),    null)
     )
 
     private suspend fun buildAllSongs(): List<MediaItem> =
@@ -317,6 +355,81 @@ class PlaybackService : MediaLibraryService() {
 
     private suspend fun buildPlaylistSongs(playlistId: Long): List<MediaItem> =
         AppDatabase.getDatabase(this).songDao().getSongsInPlaylist(playlistId).first().map { buildPlayableItem(it) }
+
+    // ─────────────────────────────────────────────────────────
+    // 播放队列 / 进度 记忆（关 App 后恢复上次播放）
+    // ─────────────────────────────────────────────────────────
+
+    /** 把当前播放队列（歌曲路径列表 + 播放到第几首 + 播放到第几毫秒）存进 SharedPreferences。 */
+    private fun savePlaybackState() {
+        try {
+            val p = player ?: return
+            val count = p.mediaItemCount
+            if (count == 0) return // 没有队列（比如从没放过歌），不覆盖上次保存的状态
+
+            val pathsArray = org.json.JSONArray()
+            for (i in 0 until count) {
+                pathsArray.put(p.getMediaItemAt(i).mediaId)
+            }
+
+            getSharedPreferences(PLAYBACK_STATE_PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_QUEUE_PATHS, pathsArray.toString())
+                .putInt(KEY_QUEUE_INDEX, p.currentMediaItemIndex)
+                .putLong(KEY_QUEUE_POSITION_MS, p.currentPosition.coerceAtLeast(0L))
+                .putBoolean(KEY_SHUFFLE_ENABLED, p.shuffleModeEnabled)
+                .putInt(KEY_REPEAT_MODE, p.repeatMode)
+                .apply()
+        } catch (e: Exception) {
+            Log.e("Auralis-Playback", "保存播放队列失败", e)
+        }
+    }
+
+    /**
+     * App 重新启动、Service 重建时调用：把上次保存的队列恢复出来。
+     * 只 setMediaItems + prepare，不自动 play()——恢复现场，但不要吓到用户突然自己放起歌来。
+     */
+    private fun restorePlaybackState() {
+        val prefs = getSharedPreferences(PLAYBACK_STATE_PREFS, Context.MODE_PRIVATE)
+        val pathsJson = prefs.getString(KEY_QUEUE_PATHS, null) ?: return
+        val savedIndex = prefs.getInt(KEY_QUEUE_INDEX, 0)
+        val savedPosition = prefs.getLong(KEY_QUEUE_POSITION_MS, 0L)
+        val savedShuffle = prefs.getBoolean(KEY_SHUFFLE_ENABLED, false)
+        val savedRepeat = prefs.getInt(KEY_REPEAT_MODE, Player.REPEAT_MODE_OFF)
+
+        serviceScope.launch {
+            try {
+                val pathsArray = org.json.JSONArray(pathsJson)
+                val paths = (0 until pathsArray.length()).map { pathsArray.getString(it) }
+                if (paths.isEmpty()) return@launch
+
+                val dao = AppDatabase.getDatabase(this@PlaybackService).songDao()
+                // 按原顺序逐个查库；歌曲若已被删除/移动就跳过，同时记得同步修正下标
+                val mediaItems = mutableListOf<MediaItem>()
+                var adjustedIndex = savedIndex
+                paths.forEachIndexed { i, path ->
+                    val song = dao.getSongByPath(path)
+                    if (song != null) {
+                        mediaItems.add(buildPlayableItem(song))
+                    } else if (i < savedIndex) {
+                        adjustedIndex-- // 前面的歌被删了，下标要往前挪
+                    }
+                }
+                if (mediaItems.isEmpty()) return@launch
+                val safeIndex = adjustedIndex.coerceIn(0, mediaItems.size - 1)
+
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    val p = player ?: return@withContext
+                    p.shuffleModeEnabled = savedShuffle
+                    p.repeatMode = savedRepeat
+                    p.setMediaItems(mediaItems, safeIndex, savedPosition)
+                    p.prepare()
+                    // 特意不调用 p.play()：只恢复现场，播放与否交给用户自己按
+                }
+            } catch (e: Exception) {
+                Log.e("Auralis-Playback", "恢复播放队列失败", e)
+            }
+        }
+    }
 
     private fun buildPlayableItem(song: Song): MediaItem {
         val artworkUri = Uri.parse(
@@ -642,9 +755,9 @@ class PlaybackService : MediaLibraryService() {
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (ok) {
                     isCurrentlyBitPerfect = true; _bitPerfectState.value = true
-                    android.widget.Toast.makeText(this, "DAC 独占已激活: ${targetSampleRate / 1000.0}kHz", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(this, getString(R.string.dac_exclusive_active, "${targetSampleRate / 1000.0}"), android.widget.Toast.LENGTH_SHORT).show()
                 } else {
-                    android.widget.Toast.makeText(this, "DAC 独占失败: 设备不支持该规格", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(this, getString(R.string.dac_exclusive_failed_unsupported), android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
@@ -666,7 +779,7 @@ class PlaybackService : MediaLibraryService() {
             }
             isCurrentlyBitPerfect = false; _bitPerfectState.value = false
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                android.widget.Toast.makeText(this, "已恢复 Android 系统混音", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(this, getString(R.string.android_mixing_restored), android.widget.Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Log.e("Auralis", "关闭 USB Bit-perfect 失败: ${e.message}")
@@ -774,7 +887,7 @@ class PlaybackService : MediaLibraryService() {
                                         val song = AppDatabase.getDatabase(this@PlaybackService)
                                             .songDao().getSongByPath(path)
                                         if (song != null) {
-                                            val fetched = CoverFetcher.fetchHighResCover(song.title, song.artist)
+                                            val fetched = CoverFetcher.fetchHighResCover(this@PlaybackService, song.title, song.artist)
                                             if (fetched != null) {
                                                 finalBitmap = fetched
                                                 CoverArtCache.saveBitmap(this@PlaybackService, path, fetched)
@@ -847,7 +960,8 @@ object VisualizerData {
 
 @UnstableApi
 class VisualizerInterceptingAudioSink(
-    private val delegate: androidx.media3.exoplayer.audio.AudioSink
+    private val delegate: androidx.media3.exoplayer.audio.AudioSink,
+    private val context: Context
 ) : androidx.media3.exoplayer.audio.AudioSink by delegate {
 
     private var currentEncoding  = C.ENCODING_INVALID
@@ -1035,12 +1149,12 @@ class VisualizerInterceptingAudioSink(
         }
         val isSuspect = cutoffHz < 19000 && ratio < 0.0005f
         val estimatedSource = when {
-            cutoffHz >= 20000 -> "真实高清音频 ✓"
-            cutoffHz >= 19500 -> "可能是 MP3 320kbps 转制"
-            cutoffHz >= 18000 -> "疑似 MP3 256kbps 转制"
-            cutoffHz >= 16000 -> "疑似 MP3 128~192kbps 转制"
-            cutoffHz >= 14000 -> "疑似 AAC / 低码率转制"
-            else              -> "疑似极低码率来源"
+            cutoffHz >= 20000 -> context.getString(R.string.audio_quality_hires_verified)
+            cutoffHz >= 19500 -> context.getString(R.string.audio_quality_maybe_mp3_320)
+            cutoffHz >= 18000 -> context.getString(R.string.audio_quality_suspect_mp3_256)
+            cutoffHz >= 16000 -> context.getString(R.string.audio_quality_suspect_mp3_128_192)
+            cutoffHz >= 14000 -> context.getString(R.string.audio_quality_suspect_aac_low_bitrate)
+            else              -> context.getString(R.string.audio_quality_suspect_very_low_bitrate)
         }
         return AudioQualityAnalysis(cutoffHz, estimatedSource, ratio, isSuspect)
     }

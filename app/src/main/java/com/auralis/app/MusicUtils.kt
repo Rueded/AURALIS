@@ -63,9 +63,9 @@ object MusicUtils {
 
                     // 2. 先拿系统提供的数据（可能残缺）
                     val id = cursor.getLong(idCol)
-                    var title = cursor.getString(titleCol) ?: "未知歌名"
-                    var artist = cursor.getString(artistCol) ?: "未知歌手"
-                    var album = cursor.getString(albumCol) ?: "未知专辑"
+                    var title = cursor.getString(titleCol) ?: context.getString(R.string.unknown_title)
+                    var artist = cursor.getString(artistCol) ?: context.getString(R.string.unknown_artist)
+                    var album = cursor.getString(albumCol) ?: context.getString(R.string.unknown_album)
                     var duration = cursor.getLong(durationCol)
                     var size = cursor.getLong(sizeCol)
                     val dateModified = cursor.getLong(dateCol)
@@ -99,14 +99,14 @@ object MusicUtils {
                             }
 
                             // 👇 【关键纠正】：如果系统索引没登记好，我们从 Tag 强行扒出歌手名
-                            if (artist == "未知歌手" || artist.contains("unknown", true)) {
-                                artist = tag?.getFirst(org.jaudiotagger.tag.FieldKey.ARTIST) ?: "未知歌手"
+                            if (artist == context.getString(R.string.unknown_artist) || artist.contains("unknown", true)) {
+                                artist = tag?.getFirst(org.jaudiotagger.tag.FieldKey.ARTIST) ?: context.getString(R.string.unknown_artist)
                             }
-                            if (title == "未知歌名" || title.contains("unknown", true)) {
+                            if (title == context.getString(R.string.unknown_title) || title.contains("unknown", true)) {
                                 title = tag?.getFirst(org.jaudiotagger.tag.FieldKey.TITLE) ?: file.nameWithoutExtension
                             }
-                            if (album == "未知专辑" || album.contains("unknown", true)) {
-                                album = tag?.getFirst(org.jaudiotagger.tag.FieldKey.ALBUM) ?: "未知专辑"
+                            if (album == context.getString(R.string.unknown_album) || album.contains("unknown", true)) {
+                                album = tag?.getFirst(org.jaudiotagger.tag.FieldKey.ALBUM) ?: context.getString(R.string.unknown_album)
                             }
 
                             // 解析 ReplayGain (反射避错版)

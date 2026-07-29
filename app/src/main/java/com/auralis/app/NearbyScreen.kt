@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
@@ -58,6 +59,9 @@ fun NearbyScreen(
     val discoveredDevices by NsdHelper.discovered.collectAsState()
     val boundDevices      = remember { mutableStateListOf<BoundDevice>() }
     var isScanning        by remember { mutableStateOf(false) }
+    // “一起听”当前加入的房主设备（真正的轮询/播放对齐逻辑在 MusicAppScreen 那边做，
+    // 这里只负责让用户点按钮来 join/leave）
+    val joinedRoomHost    by RoomManager.joinedHost.collectAsState()
 
     // 投喂/下载 UI 状态
     var selectedDevice    by remember { mutableStateOf<DiscoveredDevice?>(null) }
@@ -96,7 +100,7 @@ fun NearbyScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("附近的 Auralis", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.nearby_auralis_title), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, null)
@@ -121,7 +125,7 @@ fun NearbyScreen(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text("扫描中", fontSize = 13.sp,
+                            Text(stringResource(R.string.scanning_label), fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.primary)
                         }
                     } else {
@@ -134,7 +138,7 @@ fun NearbyScreen(
                                 isScanning = false
                             }
                         }) {
-                            Icon(Icons.Filled.Refresh, "重新扫描")
+                            Icon(Icons.Filled.Refresh, stringResource(R.string.action_rescan))
                         }
                     }
                 }
@@ -147,11 +151,47 @@ fun NearbyScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
 
+            // ── 一起听：房主开关 ─────────────────────────────
+            item {
+                val isHosting by RoomManager.isHosting.collectAsState()
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (isHosting) Icons.Filled.Headset else Icons.Outlined.Headset,
+                            null,
+                            tint = if (isHosting) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.nearby_allow_listen_together), fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (isHosting) stringResource(R.string.nearby_hosting_on_subtitle) else stringResource(R.string.nearby_hosting_off_subtitle),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isHosting,
+                            onCheckedChange = { if (it) RoomManager.startHosting() else RoomManager.stopHosting() }
+                        )
+                    }
+                }
+            }
+
             // ── 已绑定设备 ─────────────────────────────────────
             if (boundDevices.isNotEmpty()) {
                 item {
                     Text(
-                        "已绑定",
+                        stringResource(R.string.bound_label),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
@@ -161,9 +201,11 @@ fun NearbyScreen(
                 items(boundDevices, key = { it.deviceId }) { bound ->
                     val liveDevice = discoveredDevices.firstOrNull { it.deviceId == bound.deviceId }
                     val isOnline   = liveDevice != null
+                    val isListeningTogether = joinedRoomHost?.deviceId == bound.deviceId
                     BoundDeviceCard(
                         bound      = bound,
                         isOnline   = isOnline,
+                        isListeningTogether = isListeningTogether,
                         onSend     = {
                             if (liveDevice != null) {
                                 selectedDevice = liveDevice
@@ -179,6 +221,13 @@ fun NearbyScreen(
                         onPushCurrent = {
                             if (liveDevice != null && currentSong != null) {
                                 scope.launch { pushSong(context, liveDevice, currentSong, gson) }
+                            }
+                        },
+                        onToggleListenTogether = {
+                            if (isListeningTogether) {
+                                RoomManager.leave()
+                            } else if (liveDevice != null) {
+                                RoomManager.join(liveDevice)
                             }
                         },
                         onUnbind   = {
@@ -198,8 +247,8 @@ fun NearbyScreen(
 
             item {
                 Text(
-                    if (newDevices.isEmpty() && !isScanning) "附近暂无设备"
-                    else "发现新设备",
+                    if (newDevices.isEmpty() && !isScanning) stringResource(R.string.no_devices_nearby)
+                    else stringResource(R.string.new_devices_found),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
@@ -233,9 +282,9 @@ fun NearbyScreen(
             onDismissRequest = { deviceToBindDialog = null },
             shape = RoundedCornerShape(20.dp),
             icon = { Icon(Icons.Filled.Link, null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("绑定设备？") },
+            title = { Text(stringResource(R.string.bind_device_title)) },
             text  = {
-                Text("将「${device.deviceName}」添加到绑定列表后，下次无需重新扫描，直接出现在顶部。")
+                Text(stringResource(R.string.bind_device_body, device.deviceName))
             },
             confirmButton = {
                 Button(onClick = {
@@ -248,10 +297,10 @@ fun NearbyScreen(
                     boundDevices.clear()
                     boundDevices.addAll(BoundDeviceStore.getAll(context))
                     deviceToBindDialog = null
-                }) { Text("绑定") }
+                }) { Text(stringResource(R.string.action_bind)) }
             },
             dismissButton = {
-                TextButton(onClick = { deviceToBindDialog = null }) { Text("暂不") }
+                TextButton(onClick = { deviceToBindDialog = null }) { Text(stringResource(R.string.action_not_now)) }
             }
         )
     }
@@ -276,7 +325,7 @@ fun NearbyScreen(
                 scope.launch {
                     val ok = sendSongs(context, device, toSend, gson)
                     isSending = false
-                    sendResult = if (ok) "✅ 传输完成！" else "❌ 传输失败，对方可能未开启接收"
+                    sendResult = if (ok) context.getString(R.string.transfer_complete) else context.getString(R.string.transfer_failed_maybe_not_receiving)
                     if (ok) {
                         delay(1500)
                         showSongPicker = false
@@ -301,8 +350,10 @@ private fun BoundDeviceCard(
     bound: BoundDevice,
     isOnline: Boolean,
     hasCurrent: Boolean,
+    isListeningTogether: Boolean,
     onSend: () -> Unit,
     onPushCurrent: () -> Unit,
+    onToggleListenTogether: () -> Unit,
     onUnbind: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -349,7 +400,7 @@ private fun BoundDeviceCard(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        if (isOnline) "在线 · 已绑定" else "离线 · 已绑定",
+                        if (isOnline) stringResource(R.string.online_bound_label) else stringResource(R.string.offline_bound_label),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -362,10 +413,10 @@ private fun BoundDeviceCard(
             }
 
             AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                        .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // 投喂当前歌
@@ -377,7 +428,7 @@ private fun BoundDeviceCard(
                         ) {
                             Icon(Icons.Filled.Send, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("推送当前歌", fontSize = 13.sp)
+                            Text(stringResource(R.string.action_push_current_song), fontSize = 13.sp)
                         }
                     }
                     // 选歌发送
@@ -389,20 +440,45 @@ private fun BoundDeviceCard(
                     ) {
                         Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("选歌传输", fontSize = 13.sp)
+                        Text(stringResource(R.string.action_pick_songs_to_send), fontSize = 13.sp)
                     }
                     // 解绑
                     IconButton(onClick = onUnbind) {
                         Icon(
-                            Icons.Filled.LinkOff, "解绑",
+                            Icons.Filled.LinkOff, stringResource(R.string.action_unbind),
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                // 一起听：只读跟播对方正在放的歌（不会反过来控制对方）
+                FilledTonalButton(
+                    onClick  = onToggleListenTogether,
+                    enabled  = isOnline,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(12.dp),
+                    colors   = if (isListeningTogether)
+                        ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    else ButtonDefaults.filledTonalButtonColors()
+                ) {
+                    Icon(
+                        if (isListeningTogether) Icons.Filled.Headset else Icons.Outlined.Headset,
+                        null, modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (isListeningTogether) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
+                        fontSize = 13.sp
+                    )
+                }
+                }
+            }
             }
         }
     }
-}
 
 // ── 新发现设备卡片 ────────────────────────────────────────────────
 
@@ -439,7 +515,7 @@ private fun NewDeviceCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            TextButton(onClick = onBind) { Text("绑定") }
+            TextButton(onClick = onBind) { Text(stringResource(R.string.action_bind)) }
             Spacer(Modifier.width(4.dp))
             FilledTonalButton(
                 onClick = onSend,
@@ -447,7 +523,7 @@ private fun NewDeviceCard(
             ) {
                 Icon(Icons.Filled.Send, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("发送")
+                Text(stringResource(R.string.action_send))
             }
         }
     }
@@ -508,12 +584,12 @@ private fun SongPickerSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "选择要发送的歌曲",
+                    stringResource(R.string.select_songs_to_send_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "已选 ${selected.size} 首",
+                    stringResource(R.string.selected_count_label, selected.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -531,7 +607,7 @@ private fun SongPickerSheet(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("搜索歌名、歌手…") },
+                    placeholder = { Text(stringResource(R.string.search_song_artist_placeholder)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp)) },
@@ -550,7 +626,7 @@ private fun SongPickerSheet(
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
-                        Icon(Icons.Filled.Sort, "排序", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Filled.Sort, stringResource(R.string.action_sort), tint = MaterialTheme.colorScheme.primary)
                     }
                     DropdownMenu(
                         expanded = showSortMenu,
@@ -560,7 +636,7 @@ private fun SongPickerSheet(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    if (sortAscending) "升序" else "降序",
+                                    if (sortAscending) stringResource(R.string.sort_ascending) else stringResource(R.string.sort_descending),
                                     color = MaterialTheme.colorScheme.primary,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -570,12 +646,12 @@ private fun SongPickerSheet(
                         )
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
                         listOf(
-                            "Name"      to "按名称",
-                            "Artist"    to "按歌手",
-                            "Album"     to "按专辑",
-                            "Date"      to "按日期",
-                            "Size"      to "按大小",
-                            "PlayCount" to "按播放次数"
+                            "Name"      to stringResource(R.string.sort_by_name),
+                            "Artist"    to stringResource(R.string.sort_by_artist),
+                            "Album"     to stringResource(R.string.sort_by_album),
+                            "Date"      to stringResource(R.string.sort_by_date),
+                            "Size"      to stringResource(R.string.sort_by_size),
+                            "PlayCount" to stringResource(R.string.sort_by_play_count)
                         ).forEach { (type, label) ->
                             val selected = sortType == type
                             DropdownMenuItem(
@@ -614,7 +690,7 @@ private fun SongPickerSheet(
                             Icons.Filled.CheckBox
                         else
                             Icons.Filled.CheckBoxOutlineBlank,
-                        contentDescription = "全选",
+                        contentDescription = stringResource(R.string.action_select_all),
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -671,7 +747,7 @@ private fun SongPickerSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "没有找到匹配的歌曲",
+                                stringResource(R.string.no_matching_songs),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -704,11 +780,11 @@ private fun SongPickerSheet(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("传输中…")
+                    Text(stringResource(R.string.transferring_ellipsis))
                 } else {
                     Icon(Icons.Filled.Send, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("发送 ${selected.size} 首")
+                    Text(stringResource(R.string.send_count_label, selected.size))
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -794,7 +870,7 @@ fun IncomingPushDialog(
                 Spacer(Modifier.height(12.dp))
 
                 Text(
-                    "想和你分享一首歌",
+                    stringResource(R.string.wants_to_share_song),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -821,7 +897,7 @@ fun IncomingPushDialog(
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
                     ) {
                         Text(
-                            "📄 含歌词",
+                            stringResource(R.string.has_lyrics_badge),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -838,14 +914,14 @@ fun IncomingPushDialog(
             ) {
                 Icon(Icons.Filled.Download, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("立即接收")
+                Text(stringResource(R.string.action_receive_now))
             }
         },
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("暂时不要") }
+            ) { Text(stringResource(R.string.action_not_now_alt)) }
         }
     )
 }
@@ -1026,7 +1102,7 @@ fun NearbyShareQuickSheet(
                 .navigationBarsPadding()
         ) {
             Text(
-                "分享给附近设备",
+                stringResource(R.string.share_to_nearby_device),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -1046,7 +1122,7 @@ fun NearbyShareQuickSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "附近没有在线的 Auralis 设备\n请确保对方在同一 WiFi 且已开启应用",
+                        stringResource(R.string.no_nearby_devices_detail),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium
@@ -1086,7 +1162,7 @@ fun NearbyShareQuickSheet(
                                             color = MaterialTheme.colorScheme.primaryContainer
                                         ) {
                                             Text(
-                                                "已绑定",
+                                                stringResource(R.string.bound_label),
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -1113,8 +1189,8 @@ fun NearbyShareQuickSheet(
                                         scope.launch {
                                             val ok = pushSong(context, device, song, gson)
                                             sendingTo = null
-                                            resultMsg = if (ok) "✅ 已推送给 ${device.deviceName}"
-                                            else "❌ 推送失败"
+                                            resultMsg = if (ok) context.getString(R.string.pushed_to_device, device.deviceName)
+                                            else context.getString(R.string.push_failed)
                                             if (ok) delay(1500)
                                             if (ok) onDismiss()
                                         }
@@ -1123,7 +1199,7 @@ fun NearbyShareQuickSheet(
                                 ) {
                                     Icon(Icons.Filled.Send, null, modifier = Modifier.size(14.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("发送")
+                                    Text(stringResource(R.string.action_send))
                                 }
                             }
                         }

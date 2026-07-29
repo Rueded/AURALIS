@@ -1,5 +1,6 @@
 package com.auralis.app
 
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,9 +45,10 @@ fun AboutScreen(onBack: () -> Unit) {
     )
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("关于 Auralis", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.about_title), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, null)
@@ -99,13 +101,13 @@ fun AboutScreen(onBack: () -> Unit) {
                     Text("Auralis", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "Version 8.0",
+                        "Version 9.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "为音质痴迷者打造的本地音乐播放器",
+                        stringResource(R.string.about_tagline),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -119,7 +121,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.primaryContainer
                         ) {
                             Text(
-                                "🎉 你是真正的音乐痴迷者！",
+                                stringResource(R.string.easter_egg_music_fanatic),
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
@@ -141,20 +143,20 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
-                            "功能特性",
+                            stringResource(R.string.features_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(Modifier.height(14.dp))
                         listOf(
-                            Icons.Outlined.HighQuality to "Hi-Res / DSD / Bit-perfect 播放",
-                            Icons.Outlined.Lyrics      to "多源自动匹配歌词（网易云 / QQ / 酷狗）",
-                            Icons.Outlined.Palette     to "专辑封面动态主题色",
-                            Icons.Outlined.DirectionsCar to "Android Auto 驾驶模式",
-                            Icons.Outlined.Wifi        to "Auralis 设备间无线互传歌曲",
-                            Icons.Outlined.Equalizer   to "均衡器 / Bass Boost / 响度增强",
-                            Icons.Outlined.History     to "收听足迹统计"
+                            Icons.Outlined.HighQuality to stringResource(R.string.feature_hires_bitperfect),
+                            Icons.Outlined.Lyrics      to stringResource(R.string.feature_multi_source_lyrics),
+                            Icons.Outlined.Palette     to stringResource(R.string.feature_dynamic_theme),
+                            Icons.Outlined.DirectionsCar to stringResource(R.string.feature_android_auto),
+                            Icons.Outlined.Wifi        to stringResource(R.string.feature_wireless_transfer),
+                            Icons.Outlined.Equalizer   to stringResource(R.string.feature_equalizer),
+                            Icons.Outlined.History     to stringResource(R.string.feature_listening_stats)
                         ).forEach { (icon, label) ->
                             Row(
                                 modifier = Modifier.padding(vertical = 7.dp),
@@ -184,16 +186,16 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
-                            "制作人员",
+                            stringResource(R.string.credits_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(Modifier.height(14.dp))
 
-                        CreditRow(label = "设计 & 集成", value = "白开水 (Bai Kai Shui)")
+                        CreditRow(label = stringResource(R.string.credit_design_integration_label), value = "白开水 (Bai Kai Shui)")
                         Spacer(Modifier.height(8.dp))
-                        CreditRow(label = "AI 代码协助", value = "Claude (Anthropic)，Google Gemini")
+                        CreditRow(label = stringResource(R.string.credit_ai_assist_label), value = "Claude (Anthropic)，Google Gemini")
                     }
                 }
             }
@@ -209,16 +211,14 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
-                            "隐私",
+                            stringResource(R.string.privacy_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            "Auralis 不收集任何个人数据，不上传任何文件。" +
-                                    "所有音乐文件、歌词、封面均存储于本地设备。" +
-                                    "联网功能仅用于获取歌词与封面元数据，以及局域网设备间的直连传输。",
+                            stringResource(R.string.privacy_body),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 22.sp
@@ -238,7 +238,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
-                            "附近传输 · 设备信息",
+                            stringResource(R.string.nearby_transfer_device_info_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -250,7 +250,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             OutlinedTextField(
                                 value = nameField,
                                 onValueChange = { nameField = it },
-                                label = { Text("设备昵称") },
+                                label = { Text(stringResource(R.string.device_nickname_label)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
@@ -261,7 +261,7 @@ fun AboutScreen(onBack: () -> Unit) {
                                             nameField.trim().ifEmpty { android.os.Build.MODEL }
                                         )
                                         editingName = false
-                                    }) { Text("保存") }
+                                    }) { Text(stringResource(R.string.action_save)) }
                                 }
                             )
                         } else {
@@ -275,7 +275,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             ) {
                                 Column {
                                     Text(
-                                        "设备昵称",
+                                        stringResource(R.string.device_nickname_label),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -286,7 +286,7 @@ fun AboutScreen(onBack: () -> Unit) {
                                     )
                                 }
                                 Text(
-                                    "编辑",
+                                    stringResource(R.string.action_edit),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -300,7 +300,7 @@ fun AboutScreen(onBack: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
 
                         Text(
-                            "设备 ID",
+                            stringResource(R.string.device_id_label),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -317,7 +317,7 @@ fun AboutScreen(onBack: () -> Unit) {
             // ── 版权 ─────────────────────────────────────────────
             item {
                 Text(
-                    "© 2026 白开水 · All Rights Reserved\nAI-assisted code integration by Claude",
+                    stringResource(R.string.copyright_line),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center,

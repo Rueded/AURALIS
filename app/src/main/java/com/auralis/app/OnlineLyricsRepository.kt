@@ -149,7 +149,7 @@ object OnlineLyricsRepository {
             }
         }
 
-        val keyword = buildKeyword(title, artist)
+        val keyword = buildKeyword(title, artist, context)
         Log.d(TAG, "联网搜索歌词：\"$keyword\"（audioPath=$audioPath）")
 
         val prefs = context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
@@ -214,10 +214,14 @@ object OnlineLyricsRepository {
 
     private fun fetchNeteaseLyrics(keyword: String, context: Context): LyricsResult? {
         return try {
-            val candidates = NeteaseLyricsFetcher.searchCandidates(keyword, 0)
+            // 🚨 修改 1：加上 context 参数
+            val candidates = NeteaseLyricsFetcher.searchCandidates(context, keyword, 0)
             if (candidates.isEmpty()) return null
             val best = candidates.first()
-            val raw = NeteaseLyricsFetcher.fetchLyric(best.id) ?: return null
+
+            // 🚨 修改 2：加上 context 参数
+            val raw = NeteaseLyricsFetcher.fetchLyric(context, best.id) ?: return null
+
             if (isBanned(LyricsSource.NETEASE, raw, context)) return null
             val lines = LrcParser.parseRaw(raw)
             if (lines.isEmpty()) return null
@@ -304,9 +308,9 @@ object OnlineLyricsRepository {
         }
     }
 
-    private fun buildKeyword(title: String, artist: String): String {
+    private fun buildKeyword(title: String, artist: String, context: Context): String {
         val t = title.trim()
         val a = artist.trim()
-        return if (a.isEmpty() || a == "未知歌手") t else "$a $t"
+        return if (a.isEmpty() || a == context.getString(R.string.unknown_artist)) t else "$a $t"
     }
 }

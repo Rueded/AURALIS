@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -19,16 +20,25 @@ object SyncTaskQueue {
 }
 
 class SyncService : Service() {
+
+    // 同 PlaybackService：Service 不会因为 Activity.recreate() 跟着重建，
+    // 通知栏标题/渠道名这些从这里直接 getString(...) 出来的文案，
+    // 得在这单独包一次 Context 才能跟上语言设置。
+    override fun attachBaseContext(newBase: Context) {
+        val lang = LocalizationManager.readSavedLanguage(newBase)
+        super.attachBaseContext(LocalizationManager.wrapContext(newBase, lang))
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private val channelId = "sync_channel"
     private val notificationId = 1001
-    private var lastLog = "准备下载..."
+    private var lastLog = ""
 
     override fun onCreate() {
         super.onCreate()
         // 安卓 8.0 以上必须创建通知渠道
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "音乐同步进度", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, getString(R.string.music_sync_progress_title), NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
@@ -68,7 +78,7 @@ class SyncService : Service() {
                 },
                 onComplete = {
                     serviceScope.launch {
-                        updateNotification("🎉 同步大功告成！", 0, 0, false)
+                        updateNotification(getString(R.string.sync_complete_celebration), 0, 0, false)
 
                         // 👇 修复 1：直接在内部写一个神级工具函数，把系统的 TreeUri 转换成真实的硬盘绝对路径
                         fun getRealPathFromTreeUri(treeUri: android.net.Uri): String {
@@ -100,7 +110,7 @@ class SyncService : Service() {
                                 filePaths,
                                 null
                             ) { path, uri ->
-                                android.util.Log.d("SyncService", "系统 MediaStore 已成功登记文件: $path")
+                                android.util.Log.d("SyncService", "MediaStore registered file: $path")
                             }
                         }
 
@@ -132,7 +142,7 @@ class SyncService : Service() {
 
     private fun createNotification(text: String, max: Int, progress: Int, indeterminate: Boolean): Notification {
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("局域网音乐同步")
+            .setContentTitle(getString(R.string.lan_music_sync_channel))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_download) // 系统自带的下载小图标
             .setProgress(max, progress, indeterminate)
