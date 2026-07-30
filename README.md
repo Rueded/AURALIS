@@ -41,7 +41,7 @@ AURALIS 是一款基于 Media3 ExoPlayer 内核的本地音乐播放器，主要
 - 快速切歌时，借助 Compose `LaunchedEffect` 的 key 机制取消上一首歌曲未完成的网络请求（封面/歌词），并配合 500ms 防抖与 `Mutex` 互斥写入，避免异步结果乱序覆盖当前歌曲的数据。
 
 ### 均衡器
-- 基于 Android 系统的 `Equalizer` / `BassBoost` / `LoudnessEnhancer`（`android.media.audiofx`）音频效果器实现，提供五段 EQ、低音增强和响度增强，并支持 ReplayGain 动态响度平衡。这是系统级音频效果，不是自研 DSP 算法。
+- 基于 Android 系统的 `Equalizer` / `BassBoost` / `LoudnessEnhancer`（`android.media.audiofx`）音频效果器实现，提供多段 EQ（频段数由 `Equalizer.numberOfBands` 决定，因设备而异，多数设备为 5 段）、低音增强和响度增强，并支持 ReplayGain 动态响度平衡。这是系统级音频效果，不是自研 DSP 算法。
 - 若开启 USB 源码直通，音频将不经过系统混音器，此时均衡器无法生效，界面会提示“均衡器已旁路”。
 
 ### 频谱与无损鉴定（实验性功能）
@@ -126,7 +126,7 @@ AURALIS is a local music player built on the Media3 ExoPlayer engine. It mainly 
 - On rapid track switching, Compose `LaunchedEffect`'s key mechanism cancels the previous track's in-flight requests (cover/lyrics), combined with a 500ms debounce and a `Mutex` around writes, to prevent out-of-order async responses from overwriting the currently playing track's data.
 
 ### Equalizer
-- Built on Android's system `Equalizer` / `BassBoost` / `LoudnessEnhancer` (`android.media.audiofx`) audio effects — a 5-band EQ, bass boost, and loudness enhancement, plus ReplayGain-based loudness normalization. This is the standard system-level audio effects stack, not a custom DSP implementation.
+- Built on Android's system `Equalizer` / `BassBoost` / `LoudnessEnhancer` (`android.media.audiofx`) audio effects — a multi-band EQ (the band count comes from `Equalizer.numberOfBands` and varies by device, commonly 5), bass boost, and loudness enhancement, plus ReplayGain-based loudness normalization. This is the standard system-level audio effects stack, not a custom DSP implementation.
 - When USB bit-perfect passthrough is active, audio bypasses the system mixer entirely, so the equalizer can't apply — the UI shows "Equalizer bypassed" in that case.
 
 ### Spectrogram & lossless check (experimental)

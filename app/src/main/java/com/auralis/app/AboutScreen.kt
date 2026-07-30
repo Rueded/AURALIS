@@ -101,7 +101,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     Text("Auralis", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "Version 9.0",
+                        "Version 10.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

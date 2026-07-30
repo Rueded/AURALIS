@@ -117,6 +117,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Headset
 import com.auralis.app.AudioQualityAnalysis
 import com.auralis.app.VisualizerData
 import com.auralis.app.PlayerStateHolder.dominantColor
@@ -212,6 +213,7 @@ fun FullScreenPlayer(
         var coverRefreshNonce by remember { mutableIntStateOf(0) }
         var coverForceNetwork by remember { mutableStateOf(false) }
         var showShareToNearbySheet by remember { mutableStateOf(false) }
+        var showListenTogetherPicker by remember { mutableStateOf(false) }
 
         LaunchedEffect(audioPath) {
             spectrogramResult = null
@@ -471,28 +473,28 @@ fun FullScreenPlayer(
                     val channelLabel = if (spec!!.isSpatial) context.getString(R.string.detail_channels_spatial) else context.getString(R.string.detail_channels_stereo)
                     detailedInfo = """
                 🎵 ${context.getString(R.string.detail_section_basic)}
-                ${context.getString(R.string.detail_title)}：$title
-                ${context.getString(R.string.detail_artist)}：$artist
-                ${context.getString(R.string.detail_album)}：$albumStr
-                ${context.getString(R.string.detail_genre)}：$genreStr
-                ${context.getString(R.string.detail_year)}：$yearStr
+                ${context.getString(R.string.detail_title)}${context.getString(R.string.detail_separator)}$title
+                ${context.getString(R.string.detail_artist)}${context.getString(R.string.detail_separator)}$artist
+                ${context.getString(R.string.detail_album)}${context.getString(R.string.detail_separator)}$albumStr
+                ${context.getString(R.string.detail_genre)}${context.getString(R.string.detail_separator)}$genreStr
+                ${context.getString(R.string.detail_year)}${context.getString(R.string.detail_separator)}$yearStr
 
                 📊 ${context.getString(R.string.detail_section_audio_specs)}
-                ${context.getString(R.string.detail_quality)}：${spec!!.level.label} ($extName)
-                ${context.getString(R.string.detail_sample_rate)}：${dbSampleRate / 1000.0} kHz
-                ${context.getString(R.string.detail_bit_depth)}：$dbBits bit
-                ${context.getString(R.string.detail_channels)}：$ch ($channelLabel)
-                ${context.getString(R.string.detail_bitrate)}：${br / 1000} kbps
-                ${context.getString(R.string.detail_gain)}：${if (dbGain != 0f) String.format("%.2f dB", dbGain) else context.getString(R.string.gain_not_detected)}
+                ${context.getString(R.string.detail_quality)}${context.getString(R.string.detail_separator)}${spec!!.level.label} ($extName)
+                ${context.getString(R.string.detail_sample_rate)}${context.getString(R.string.detail_separator)}${dbSampleRate / 1000.0} kHz
+                ${context.getString(R.string.detail_bit_depth)}${context.getString(R.string.detail_separator)}$dbBits bit
+                ${context.getString(R.string.detail_channels)}${context.getString(R.string.detail_separator)}$ch ($channelLabel)
+                ${context.getString(R.string.detail_bitrate)}${context.getString(R.string.detail_separator)}${br / 1000} kbps
+                ${context.getString(R.string.detail_gain)}${context.getString(R.string.detail_separator)}${if (dbGain != 0f) String.format("%.2f dB", dbGain) else context.getString(R.string.gain_not_detected)}
 
                 📁 ${context.getString(R.string.detail_section_file_stats)}
-                ${context.getString(R.string.detail_size)}：$sizeStr
-                ${context.getString(R.string.detail_duration)}：${formatTime(durationMs)}
-                ${context.getString(R.string.detail_play_count)}：$playCount ${context.getString(R.string.detail_play_count_unit)}
-                ${context.getString(R.string.detail_last_played)}：$lastPlayedStr
-                ${context.getString(R.string.detail_last_modified)}：$lastModifiedStr
+                ${context.getString(R.string.detail_size)}${context.getString(R.string.detail_separator)}$sizeStr
+                ${context.getString(R.string.detail_duration)}${context.getString(R.string.detail_separator)}${formatTime(durationMs)}
+                ${context.getString(R.string.detail_play_count)}${context.getString(R.string.detail_separator)}$playCount ${context.getString(R.string.detail_play_count_unit)}
+                ${context.getString(R.string.detail_last_played)}${context.getString(R.string.detail_separator)}$lastPlayedStr
+                ${context.getString(R.string.detail_last_modified)}${context.getString(R.string.detail_separator)}$lastModifiedStr
                 
-                ${context.getString(R.string.detail_path)}：$audioPath
+                ${context.getString(R.string.detail_path)}${context.getString(R.string.detail_separator)}$audioPath
             """.trimIndent()
                 } catch (e: Exception) {
                     android.util.Log.e("Player", context.getString(R.string.parse_detail_failed, e.message))
@@ -668,45 +670,45 @@ fun FullScreenPlayer(
                         }
                     )
                 }
-                PlayerToolChip(
-                    label = abLabel,
-                    selected = abLoopEnd >= 0,
-                    onClick = {
-                        when {
-                            abLoopStart < 0 -> {
-                                abLoopStart = currentPosition
-                                Toast.makeText(context, context.getString(R.string.ab_point_a_set), Toast.LENGTH_SHORT).show()
-                            }
-                            abLoopEnd < 0 -> {
-                                if (currentPosition > abLoopStart) {
-                                    abLoopEnd = currentPosition
-                                    Toast.makeText(context, context.getString(R.string.ab_point_b_set), Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, context.getString(R.string.ab_point_b_must_after_a), Toast.LENGTH_SHORT).show()
+                    PlayerToolChip(
+                        label = abLabel,
+                        selected = abLoopEnd >= 0,
+                        onClick = {
+                            when {
+                                abLoopStart < 0 -> {
+                                    abLoopStart = currentPosition
+                                    Toast.makeText(context, context.getString(R.string.ab_point_a_set), Toast.LENGTH_SHORT).show()
+                                }
+                                abLoopEnd < 0 -> {
+                                    if (currentPosition > abLoopStart) {
+                                        abLoopEnd = currentPosition
+                                        Toast.makeText(context, context.getString(R.string.ab_point_b_set), Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, context.getString(R.string.ab_point_b_must_after_a), Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                else -> {
+                                    abLoopStart = -1L
+                                    abLoopEnd = -1L
+                                    Toast.makeText(context, context.getString(R.string.ab_cancelled), Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            else -> {
-                                abLoopStart = -1L
-                                abLoopEnd = -1L
-                                Toast.makeText(context, context.getString(R.string.ab_cancelled), Toast.LENGTH_SHORT).show()
-                            }
                         }
-                    }
-                )
-                PlayerToolChip(
-                    label = if (isFavorite) stringResource(R.string.favorite_added) else stringResource(R.string.favorite_add),
-                    selected = isFavorite,
-                    onClick = onFavoriteClick,
-                    icon = {
-                        Icon(
-                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            null,
-                            modifier = Modifier.size(16.dp),
-                            tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                )
-                PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
+                    )
+                    PlayerToolChip(
+                        label = if (isFavorite) stringResource(R.string.favorite_added) else stringResource(R.string.favorite_add),
+                        selected = isFavorite,
+                        onClick = onFavoriteClick,
+                        icon = {
+                            Icon(
+                                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    )
+                    PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
                 PlayerToolChip(
                     label = stringResource(R.string.action_share),
                     selected = false,
@@ -722,22 +724,41 @@ fun FullScreenPlayer(
                     },
                     icon = { Icon(Icons.Filled.Wifi, null, modifier = Modifier.size(16.dp)) }
                 )
-                PlayerToolChip(
-                    label = stringResource(R.string.action_timer),
-                    selected = sleepTimerSeconds > 0,
-                    onClick = onSleepTimerClick,
-                    icon = {
-                        Icon(
-                            Icons.Filled.NightsStay,
-                            null,
-                            modifier = Modifier.size(16.dp),
-                            tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                )
+                    val joinedRoomHost by RoomManager.joinedHost.collectAsState()
+                    PlayerToolChip(
+                        label = if (joinedRoomHost != null) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
+                        selected = joinedRoomHost != null,
+                        onClick = {
+                            if (joinedRoomHost != null) {
+                                RoomManager.leave()
+                            } else {
+                                showListenTogetherPicker = true
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                if (joinedRoomHost != null) Icons.Filled.Headset else Icons.Outlined.Headset,
+                                null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                    PlayerToolChip(
+                        label = stringResource(R.string.action_timer),
+                        selected = sleepTimerSeconds > 0,
+                        onClick = onSleepTimerClick,
+                        icon = {
+                            Icon(
+                                Icons.Filled.NightsStay,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    )
+                }
             }
-        }
 
 
         val bgModePref = remember {
@@ -878,9 +899,9 @@ fun FullScreenPlayer(
                                 modifier = Modifier.fillMaxSize()
                                     .wrapContentWidth(Alignment.CenterHorizontally)
                                     .width(volumeBarWidth).background(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
-                                        CircleShape
-                                    )
+                                    MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
+                                    CircleShape
+                                )
                             )
                         }
                     }
@@ -1722,6 +1743,46 @@ fun FullScreenPlayer(
             }
         }
 
+        // ── 一起听：设备选择弹窗 ──────────────────────────────────────────────────
+        if (showListenTogetherPicker) {
+            val liveDevices by NsdHelper.discovered.collectAsState()
+            val boundDevices = remember { BoundDeviceStore.getAll(context) }
+            val candidates = remember(liveDevices, boundDevices) {
+                liveDevices.filter { live -> boundDevices.any { it.deviceId == live.deviceId } }
+            }
+            AlertDialog(
+                onDismissRequest = { showListenTogetherPicker = false },
+                title = { Text(stringResource(R.string.pick_listen_together_device_title)) },
+                text = {
+                    if (candidates.isEmpty()) {
+                        Text(stringResource(R.string.no_bound_online_devices), style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        Column {
+                            candidates.forEach { device ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            RoomManager.join(device)
+                                            showListenTogetherPicker = false
+                                        }
+                                        .padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Outlined.Headset, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(device.deviceName, style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showListenTogetherPicker = false }) { Text(stringResource(R.string.action_cancel)) }
+                }
+            )
+        }
+
         // ── 删除歌词确认弹窗 ──────────────────────────────────────────────────────
         if (showDeleteLyricsConfirm) {
             var dontAskAgain by remember { mutableStateOf(false) }
@@ -2242,37 +2303,37 @@ fun FullScreenPlayer(
                                         alpha = if (isBeingDragged) 0.92f else 1f
                                     }
                                     .pointerInput(item?.mediaId) {
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = {
-                                                draggedItemIndex = index; dragOffsetY = 0f
-                                            },
-                                            onDragEnd = {
-                                                val from = draggedItemIndex;
-                                                val offset = dragOffsetY; draggedItemIndex =
-                                                null; dragOffsetY = 0f; if (from != null) {
-                                                val to =
-                                                    (from + (offset / itemHeightPx).roundToInt()).coerceIn(
-                                                        0,
-                                                        count - 1
-                                                    ); if (from != to) {
-                                                    val movedItem =
-                                                        currentList.removeAt(from); currentList.add(
-                                                        to,
-                                                        movedItem
-                                                    ); mediaController?.moveMediaItem(from, to)
-                                                }
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggedItemIndex = index; dragOffsetY = 0f
+                                        },
+                                        onDragEnd = {
+                                            val from = draggedItemIndex;
+                                            val offset = dragOffsetY; draggedItemIndex =
+                                            null; dragOffsetY = 0f; if (from != null) {
+                                            val to =
+                                                (from + (offset / itemHeightPx).roundToInt()).coerceIn(
+                                                    0,
+                                                    count - 1
+                                                ); if (from != to) {
+                                                val movedItem =
+                                                    currentList.removeAt(from); currentList.add(
+                                                    to,
+                                                    movedItem
+                                                ); mediaController?.moveMediaItem(from, to)
                                             }
-                                            },
-                                            onDragCancel = {
-                                                draggedItemIndex = null; dragOffsetY = 0f
-                                            },
-                                            onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
-                                    }.clickable {
-                                        val realIdx =
-                                            (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
-                                        mediaController?.seekTo(realIdx, 0L); mediaController?.play()
-                                    }; showPlaylistSheet = false
-                                    },
+                                        }
+                                        },
+                                        onDragCancel = {
+                                            draggedItemIndex = null; dragOffsetY = 0f
+                                        },
+                                        onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
+                                }.clickable {
+                                    val realIdx =
+                                        (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
+                                    mediaController?.seekTo(realIdx, 0L); mediaController?.play()
+                                }; showPlaylistSheet = false
+                                },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 PlaylistQueueRow(

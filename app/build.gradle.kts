@@ -13,8 +13,8 @@ android {
         applicationId = "com.auralis.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 11
-        versionName = "9.0"
+        versionCode = 12
+        versionName = "10.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,6 +61,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+    // Google Drive 云备份：仅用登录拿 OAuth token，实际 Drive API 走现成的 OkHttp 直接调 REST 接口，
+    // 不引入体积更大的 google-api-client / google-api-services-drive。
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
 
@@ -72,6 +75,7 @@ dependencies {
 
     implementation("net.jthink:jaudiotagger:3.0.1")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

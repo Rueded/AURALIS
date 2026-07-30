@@ -137,6 +137,22 @@ interface SongDao {
     // 👇 建议新增：如果你想在删除文件时也同步清理歌单关联，可以加这个
     @Query("DELETE FROM playlist_songs WHERE songPath = :songPath")
     suspend fun removeSongFromAllPlaylists(songPath: String)
+
+    // ── Google Drive 备份 / 恢复 ──
+    @Query("UPDATE songs SET isFavorite = :isFavorite, playCount = :playCount, lastPlayed = :lastPlayed WHERE data = :audioPath")
+    suspend fun restoreFavoriteAndStats(audioPath: String, isFavorite: Boolean, playCount: Int, lastPlayed: Long)
+
+    @Query("SELECT * FROM play_history")
+    suspend fun getAllHistorySync(): List<PlayHistory>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertHistoryList(historyList: List<PlayHistory>)
+
+    @Query("SELECT * FROM playlists ORDER BY createdAt DESC")
+    suspend fun getAllPlaylistsSync(): List<Playlist>
+
+    @Query("SELECT songPath FROM playlist_songs WHERE playlistId = :playlistId")
+    suspend fun getPlaylistSongPaths(playlistId: Long): List<String>
 }
 
 @Dao

@@ -4,6 +4,7 @@ import androidx.compose.ui.res.stringResource
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -59,6 +60,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val activity = LocalActivity.current
+    val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
 
@@ -381,6 +383,118 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
+            // ── 云备份 ────────────────────────────────────────
+            SettingsSection(stringResource(R.string.settings_section_backup), Icons.Outlined.CloudDownload, MaterialTheme.colorScheme.tertiary) {
+                var driveAccount by remember { mutableStateOf(DriveSyncManager.getSignedInAccount(context)) }
+                var isWorking by remember { mutableStateOf(false) }
+                var lastBackupAt by remember { mutableStateOf(DriveSyncManager.lastBackupAt(context)) }
+                var showRestoreConfirm by remember { mutableStateOf(false) }
+                val sdf = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
+
+                val signInLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) {
+                    driveAccount = DriveSyncManager.getSignedInAccount(context)
+                }
+
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        stringResource(R.string.drive_backup_subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(14.dp))
+
+                    if (driveAccount == null) {
+                        Button(
+                            onClick = { signInLauncher.launch(DriveSyncManager.buildSignInIntent(context)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Outlined.CloudDownload, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_sign_in_google))
+                        }
+                    } else {
+                        Text(
+                            stringResource(R.string.signed_in_as, driveAccount?.email ?: driveAccount?.displayName ?: ""),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (lastBackupAt > 0) stringResource(R.string.last_backup_at, sdf.format(java.util.Date(lastBackupAt)))
+                            else stringResource(R.string.never_backed_up),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            FilledTonalButton(
+                                onClick = {
+                                    isWorking = true
+                                    scope.launch {
+                                        val error = DriveSyncManager.backup(context)
+                                        isWorking = false
+                                        if (error == null) {
+                                            lastBackupAt = DriveSyncManager.lastBackupAt(context)
+                                            Toast.makeText(context, context.getString(R.string.backup_success), Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                enabled = !isWorking,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(if (isWorking) stringResource(R.string.backup_in_progress) else stringResource(R.string.action_backup_now))
+                            }
+                            OutlinedButton(
+                                onClick = { showRestoreConfirm = true },
+                                enabled = !isWorking,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(stringResource(R.string.action_restore_backup))
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = {
+                            DriveSyncManager.signOut(context) { driveAccount = null }
+                        }) {
+                            Text(stringResource(R.string.action_sign_out), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+
+                if (showRestoreConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showRestoreConfirm = false },
+                        title = { Text(stringResource(R.string.confirm_restore_title)) },
+                        text = { Text(stringResource(R.string.confirm_restore_body)) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showRestoreConfirm = false
+                                isWorking = true
+                                scope.launch {
+                                    val error = DriveSyncManager.restore(context)
+                                    isWorking = false
+                                    Toast.makeText(
+                                        context,
+                                        error ?: context.getString(R.string.restore_success),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }) { Text(stringResource(R.string.action_restore_backup)) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showRestoreConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
+                        }
                     )
                 }
             }

@@ -515,6 +515,13 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     // 播放/暂停状态也跟房主保持一致。找不到本地同名歌曲就只更新状态、提示用户，不强行播放。
     LaunchedEffect(mediaController) {
         var lastSyncedFilename = ""
+        // 记录"已经确认在本机找不到"的那个文件名——
+        // 之前的 bug 就出在这：找不到本地版本时，只是把 lastSyncedFilename 标记成"已处理"，
+        // 但下一轮轮询一看"文件名没变"，就会进到"同一首歌，校正播放/暂停状态"那个分支，
+        // 把主机的播放/暂停状态硬套到本机当前正在放的、完全不相关的内容上——
+        // 于是主机一暂停，本机正在放的别的歌也会跟着被暂停。
+        // 现在明确记一个"确认缺失"的状态，只要还是这首缺失的歌，就完全不碰本机播放器。
+        var missingFilename = ""
         while (isActive) {
             val joined = RoomManager.joinedHost.value
             val controller = mediaController
@@ -522,18 +529,22 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 val state = withContext(Dispatchers.IO) { fetchRoomState(joined) }
                 RoomManager.setRemoteState(state)
                 if (state != null) {
-                    if (state.filename != lastSyncedFilename) {
+                    if (state.filename == missingFilename) {
+                        // 已知这首歌本机没有，不对本机播放器做任何播放/暂停/进度控制
+                    } else if (state.filename != lastSyncedFilename) {
                         val localSong = allSongs.find { File(it.data).name == state.filename }
                         if (localSong != null) {
                             val index = allSongs.indexOf(localSong)
                             onSongClickAction(localSong, index, allSongs)
                             lastSyncedFilename = state.filename
+                            missingFilename = ""
                         } else {
                             Toast.makeText(context, context.getString(R.string.room_song_missing, state.title), Toast.LENGTH_SHORT).show()
-                            lastSyncedFilename = state.filename // 避免这条 Toast 一直重复弹
+                            missingFilename = state.filename
+                            lastSyncedFilename = "" // 万一之后主机又切回一首本机有的歌，能正常触发切歌
                         }
                     } else {
-                        // 同一首歌：校正播放/暂停状态 + 进度漂移
+                        // 同一首本机确实有的歌：校正播放/暂停状态 + 进度漂移
                         val estimatedRemotePos = if (state.isPlaying) {
                             state.positionMs + (System.currentTimeMillis() - state.updatedAtMs)
                         } else state.positionMs
@@ -545,6 +556,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }
             } else if (joined == null) {
                 lastSyncedFilename = ""
+                missingFilename = ""
             }
             delay(1500)
         }

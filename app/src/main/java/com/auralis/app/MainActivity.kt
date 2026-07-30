@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        
         audioPermissionGranted.value = hasPermission()
 
         // 多语言：App 一启动就把上次选的语言读出来

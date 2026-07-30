@@ -90,6 +90,7 @@
     <string name="detail_last_played">Last Played</string>
     <string name="detail_last_modified">Modified</string>
     <string name="detail_path">Path</string>
+    <string name="detail_separator">: </string>
     <string name="action_share_song">Share song</string>
     <string name="share_song_text">Now playing: %1$s - %2$s</string>
     <string name="bitperfect_speed_locked">Bit-perfect is on — speed can\'t be changed in hardware passthrough mode</string>
@@ -437,7 +438,7 @@
     <string name="credit_design_integration_label">Design &amp; Integration</string>
     <string name="credit_ai_assist_label">AI coding assistance</string>
     <string name="privacy_title">Privacy</string>
-    <string name="privacy_body">Auralis doesn\'t collect any personal data or upload any files. All music files, lyrics, and covers are stored on your local device. Network access is only used to fetch lyrics and cover metadata, and for direct device-to-device transfers over the local network.</string>
+    <string name="privacy_body">All music files, lyrics, and covers are still stored on your local device. Network access is used to fetch lyrics and cover metadata, direct device-to-device transfers over the local network, and an optional Google Drive backup (off by default, only activates once you sign in and enable it) — which only backs up in-app data like favorites, play history, playlists, and EQ presets, stored in a private space under your own Google account that\'s invisible even to you in Drive\'s UI and accessible only by this app. Sensitive fields such as your NetEase Cloud Music cookie and LAN device IP are encrypted before upload, never stored in plain text in the cloud.</string>
     <string name="nearby_transfer_device_info_title">Nearby Transfer · Device Info</string>
     <string name="device_nickname_label">Device nickname</string>
     <string name="action_save">Save</string>
@@ -472,4 +473,26 @@
     <string name="action_import_lrc">Import LRC</string>
     <string name="playback_queue_title">Playback Queue</string>
     <string name="song_count_suffix">%1$d songs</string>
+    <string name="pick_listen_together_device_title">Choose a device to listen along with</string>
+    <string name="no_bound_online_devices">No bound, online devices nearby — bind one first in "Nearby Auralis"</string>
+
+    <!-- Google Drive backup -->
+    <string name="drive_not_signed_in">Not signed in to a Google account</string>
+    <string name="drive_backup_failed">Backup failed, check your connection and try again</string>
+    <string name="drive_no_backup_found">No backup found in the cloud yet</string>
+    <string name="settings_section_backup">Cloud Backup</string>
+    <string name="drive_backup_subtitle">Backs up favorites, playlists, listening history, and EQ presets — not the music files themselves</string>
+    <string name="action_sign_in_google">Sign in with Google</string>
+    <string name="signed_in_as">Signed in as %1$s</string>
+    <string name="action_sign_out">Sign out</string>
+    <string name="action_backup_now">Back up now</string>
+    <string name="action_restore_backup">Restore from cloud</string>
+    <string name="never_backed_up">Never backed up</string>
+    <string name="last_backup_at">Last backup: %1$s</string>
+    <string name="backup_in_progress">Backing up…</string>
+    <string name="restore_in_progress">Restoring…</string>
+    <string name="backup_success">Backup successful ✅</string>
+    <string name="restore_success">Restore successful ✅ — some items may need a library rescan to show up</string>
+    <string name="confirm_restore_title">Restore from the cloud?</string>
+    <string name="confirm_restore_body">Restoring only adds and updates data — it won\'t delete your current favorites, playlists, or history.</string>
 </resources>
