@@ -495,4 +495,6 @@
     <string name="restore_success">恢复成功 ✅，部分内容可能需要重新扫描曲库后才会显示</string>
     <string name="confirm_restore_title">确定要从云端恢复吗？</string>
     <string name="confirm_restore_body">恢复只会新增和更新数据，不会删除你现在已有的收藏、歌单或历史记录。</string>
+    <string name="auto_backup_toggle_title">自动备份</string>
+    <string name="auto_backup_toggle_subtitle">收藏、歌单、网易云 Cookie 等有变动时，几分钟内自动备份一次</string>
 </resources>

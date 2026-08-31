@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
@@ -51,55 +50,62 @@ private data class HistoryPageState(
     val sortByRecent: Boolean = false    // false = 按次数（原本行为），true = 按最近播放时间
 )
 
+// 模块级缓存：跟 HistoryScreen() 这个 Composable 的生命周期脱钩，只要进程没死就一直在。
+// 用来解决"每次点进历史足迹都要重新转圈加载"的问题——专辑、最近常听这些 tab 的数据
+// 本来就是从外层常驻内存的歌曲列表派生出来的，切页不会重新查库；历史足迹这边是自己
+// 单独查 Room 数据库统计年度/月度数据，状态只存在 Composable 自己身上的话，Pager 把
+// 这一页挪出可见范围再挪回来时，Composable 会被整个销毁重建，state 也跟着清零变回
+// isLoading=true，于是每次点进来都要先转一圈圈才出内容。
+// 有了这份缓存之后：非第一次进这个 tab 时，直接拿上次的数据垫底展示，不转圈；
+// 同时在背后悄悄跑一次刷新，把这段时间里新产生的播放记录补上，用户全程无感。
+private var cachedHistoryState: HistoryPageState? = null
+
 // ─────────────────────────────────────────────────────────────
 // 入口 Composable
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf(HistoryPageState()) }
+    var state by remember { mutableStateOf(cachedHistoryState ?: HistoryPageState()) }
+    // 记录"这次进入这个 tab 后，年/月/排序变化触发的加载"是不是头一回——
+    // 头一回如果有缓存垫底，就悄悄刷新、不弹转圈；之后用户自己手动切年份/月份，
+    // 那是新请求了从没缓存过的数据，还是应该正常转圈提示一下
+    var firstLoadHandled by remember { mutableStateOf(false) }
 
-    // 初始加载
+    // 初始加载年份列表：只有这个进程里头一次打开这个 tab（没有任何缓存）才需要查，
+    // 有缓存的话年份列表、当前选中的年月都已经是现成的，不用重新查一遍
     LaunchedEffect(Unit) {
-        state = loadYears(context, state)
+        if (cachedHistoryState == null) {
+            state = loadYears(context, state)
+        }
     }
 
-    // 年份、月份或排序方式变化时重新加载数据
+    // 年份、月份或排序方式变化时（重新）加载数据
     LaunchedEffect(state.selectedYear, state.selectedMonth, state.sortByRecent) {
         if (state.selectedYear.isNotEmpty()) {
-            state = state.copy(isLoading = true)
-            state = loadPeriodData(context, state)
+            val silentRefresh = !firstLoadHandled && cachedHistoryState != null
+            firstLoadHandled = true
+            if (!silentRefresh) state = state.copy(isLoading = true)
+            state = loadPeriodData(context, state).copy(isLoading = false)
+            cachedHistoryState = state
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.tab_history), fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-    ) { padding ->
+    // 👇 不再自带 Scaffold/TopAppBar/背景色，和"专辑""最近常听"等 tab 保持同一种写法，
+    // 直接透出外层共享的动态氛围背景，不再是一块单独盖上去的纯色板
+    Box(modifier = Modifier.fillMaxSize()) {
         if (state.isLoading) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
         } else if (state.availableYears.isEmpty()) {
-            EmptyHistoryPlaceholder(modifier = Modifier.padding(padding))
+            EmptyHistoryPlaceholder()
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -219,7 +225,7 @@ private suspend fun loadPeriodData(context: Context, state: HistoryPageState): H
 
             val monthly = dao.getMonthlyPlayCounts(yearStart, yearEnd)
             val top = if (state.sortByRecent) dao.getRecentSongsInPeriod(yearStart, yearEnd, 10)
-                      else dao.getTopSongsInPeriod(yearStart, yearEnd, 10)
+            else dao.getTopSongsInPeriod(yearStart, yearEnd, 10)
             val total = dao.getTotalPlaysInYear(yearStart, yearEnd)
             val totalMs = dao.getTotalListenedMs() ?: 0L
 
@@ -242,7 +248,7 @@ private suspend fun loadPeriodData(context: Context, state: HistoryPageState): H
 
             val daily = dao.getDailyPlayCounts(monthStart, monthEnd)
             val top = if (state.sortByRecent) dao.getRecentSongsInPeriod(monthStart, monthEnd, 10)
-                      else dao.getTopSongsInPeriod(monthStart, monthEnd, 10)
+            else dao.getTopSongsInPeriod(monthStart, monthEnd, 10)
             val total = dao.getPlayCountInPeriod(monthStart, monthEnd)
 
             state.copy(

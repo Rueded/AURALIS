@@ -36,6 +36,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -76,7 +79,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
+        // 🎮 游戏式沉浸状态栏：默认隐藏，需要时从顶部下滑临时唤出（不占布局空间）
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.hide(WindowInsetsCompat.Type.statusBars())
+        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
         audioPermissionGranted.value = hasPermission()
 
         // 多语言：App 一启动就把上次选的语言读出来
@@ -121,6 +130,15 @@ class MainActivity : ComponentActivity() {
     private fun hasPermission(): Boolean {
         return ContextCompat.checkSelfPermission(this, audioReadPermission()) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // 从后台切回来、或分屏/多任务切换后，系统可能会重新显示状态栏，这里保证它还是收起的
+            WindowCompat.getInsetsController(window, window.decorView)
+                .hide(WindowInsetsCompat.Type.statusBars())
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

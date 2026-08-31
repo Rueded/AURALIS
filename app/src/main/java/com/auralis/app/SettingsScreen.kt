@@ -376,7 +376,13 @@ fun SettingsScreen(
                         value = customCookie,
                         onValueChange = {
                             customCookie = it
-                            prefs.edit().putString("netease_custom_cookie", it).apply()
+                            prefs.edit()
+                                .putString("netease_custom_cookie", it)
+                                // 这里必须打上真实的"改动时间"，DriveSyncManager 备份/合并 cookie
+                                // 就是靠这个时间戳判断"哪一份更新"，而不是靠"哪次跑了备份"。
+                                // key 要跟 DriveSyncManager.KEY_SETTINGS_UPDATED_AT 完全一致（"netease_cookie_updated_at"）
+                                .putLong("netease_cookie_updated_at", System.currentTimeMillis())
+                                .apply()
                         },
                         label = { Text(stringResource(R.string.custom_cookie_label)) },
                         placeholder = { Text("MUSIC_U=xxx; __csrf=yyy...") },
@@ -393,6 +399,7 @@ fun SettingsScreen(
                 var isWorking by remember { mutableStateOf(false) }
                 var lastBackupAt by remember { mutableStateOf(DriveSyncManager.lastBackupAt(context)) }
                 var showRestoreConfirm by remember { mutableStateOf(false) }
+                var autoBackupEnabled by remember { mutableStateOf(DriveSyncManager.isAutoBackupEnabled(context)) }
                 val sdf = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
 
                 val signInLauncher = rememberLauncherForActivityResult(
@@ -432,6 +439,32 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.auto_backup_toggle_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(R.string.auto_backup_toggle_subtitle),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = autoBackupEnabled,
+                                onCheckedChange = { checked ->
+                                    autoBackupEnabled = checked
+                                    DriveSyncManager.setAutoBackupEnabled(context, checked)
+                                    if (checked) {
+                                        // 刚打开开关那一刻，把 InvalidationTracker / SharedPreferences 监听器再注册一次兜底——
+                                        // 理论上 Application.onCreate 已经注册过，这里只是防止极端情况下漏挂
+                                        DriveSyncManager.startWatchingForChanges(context)
+                                    }
+                                }
+                            )
+                        }
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             FilledTonalButton(

@@ -180,110 +180,110 @@ fun PremiumMiniPlayerBar(
         tonalElevation = 6.dp
     ) {
         Column {
-        LinearProgressIndicator(
-            progress = { animatedProgress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp),
-            color = primary,
-            trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
+            LinearProgressIndicator(
+                progress = { animatedProgress },
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .fillMaxWidth()
+                    .height(2.dp),
+                color = primary,
+                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (coverBitmap != null) {
-                    Image(
-                        bitmap = coverBitmap,
-                        contentDescription = stringResource(R.string.content_desc_cover),
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    AdvancedFluidCover(
-                        seedString = audioPath.ifEmpty { title },
-                        modifier = Modifier.fillMaxSize(),
-                        iconSize = 22.dp
-                    )
-                }
-                if (isPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.35f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        PlayingWaveform(isPlaying = true)
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                ) {
+                    if (coverBitmap != null) {
+                        Image(
+                            bitmap = coverBitmap,
+                            contentDescription = stringResource(R.string.content_desc_cover),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        AdvancedFluidCover(
+                            seedString = audioPath.ifEmpty { title },
+                            modifier = Modifier.fillMaxSize(),
+                            iconSize = 22.dp
+                        )
+                    }
+                    if (isPlaying) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            PlayingWaveform(isPlaying = true)
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = if (isPlaying) Modifier.basicMarquee() else Modifier
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (isPlaying) Modifier.basicMarquee() else Modifier
+                    )
+                    Text(
+                        artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                AnimatedEqIcon(
+                    isPlaying = isPlaying,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    tint = primary
                 )
-                Text(
-                    artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
 
-            AnimatedEqIcon(
-                isPlaying = isPlaying,
-                modifier = Modifier.padding(horizontal = 4.dp),
-                tint = primary
-            )
+                FilledIconButton(
+                    onClick = onPreviousClick,
+                    modifier = Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Icon(Icons.Filled.SkipPrevious, stringResource(R.string.content_desc_previous), modifier = Modifier.size(22.dp))
+                }
 
-            FilledIconButton(
-                onClick = onPreviousClick,
-                modifier = Modifier.size(40.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                )
-            ) {
-                Icon(Icons.Filled.SkipPrevious, stringResource(R.string.content_desc_previous), modifier = Modifier.size(22.dp))
-            }
+                FilledIconButton(
+                    onClick = onPlayPauseClick,
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = primary)
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        stringResource(R.string.content_desc_play_pause),
+                        modifier = Modifier.size(26.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
 
-            FilledIconButton(
-                onClick = onPlayPauseClick,
-                modifier = Modifier.size(48.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = primary)
-            ) {
-                Icon(
-                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    stringResource(R.string.content_desc_play_pause),
-                    modifier = Modifier.size(26.dp),
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
+                FilledIconButton(
+                    onClick = onNextClick,
+                    modifier = Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Icon(Icons.Filled.SkipNext, stringResource(R.string.content_desc_next), modifier = Modifier.size(22.dp))
+                }
             }
-
-            FilledIconButton(
-                onClick = onNextClick,
-                modifier = Modifier.size(40.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                )
-            ) {
-                Icon(Icons.Filled.SkipNext, stringResource(R.string.content_desc_next), modifier = Modifier.size(22.dp))
-            }
-        }
         }
     }
 }
@@ -703,7 +703,7 @@ fun SettingsHeroTopBar(onBack: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f), tonalElevation = 2.dp) {
         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {

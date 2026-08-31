@@ -414,71 +414,71 @@ private fun BoundDeviceCard(
 
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // 投喂当前歌
-                    if (hasCurrent) {
-                        FilledTonalButton(
-                            onClick  = onPushCurrent,
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 投喂当前歌
+                        if (hasCurrent) {
+                            FilledTonalButton(
+                                onClick  = onPushCurrent,
+                                modifier = Modifier.weight(1f),
+                                shape    = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Filled.Send, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.action_push_current_song), fontSize = 13.sp)
+                            }
+                        }
+                        // 选歌发送
+                        OutlinedButton(
+                            onClick  = onSend,
+                            enabled  = isOnline,
                             modifier = Modifier.weight(1f),
                             shape    = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Filled.Send, null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.action_push_current_song), fontSize = 13.sp)
+                            Text(stringResource(R.string.action_pick_songs_to_send), fontSize = 13.sp)
+                        }
+                        // 解绑
+                        IconButton(onClick = onUnbind) {
+                            Icon(
+                                Icons.Filled.LinkOff, stringResource(R.string.action_unbind),
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
-                    // 选歌发送
-                    OutlinedButton(
-                        onClick  = onSend,
+                    Spacer(Modifier.height(8.dp))
+                    // 一起听：只读跟播对方正在放的歌（不会反过来控制对方）
+                    FilledTonalButton(
+                        onClick  = onToggleListenTogether,
                         enabled  = isOnline,
-                        modifier = Modifier.weight(1f),
-                        shape    = RoundedCornerShape(12.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = if (isListeningTogether)
+                            ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        else ButtonDefaults.filledTonalButtonColors()
                     ) {
-                        Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.action_pick_songs_to_send), fontSize = 13.sp)
-                    }
-                    // 解绑
-                    IconButton(onClick = onUnbind) {
                         Icon(
-                            Icons.Filled.LinkOff, stringResource(R.string.action_unbind),
-                            tint = MaterialTheme.colorScheme.error
+                            if (isListeningTogether) Icons.Filled.Headset else Icons.Outlined.Headset,
+                            null, modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (isListeningTogether) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
+                            fontSize = 13.sp
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                // 一起听：只读跟播对方正在放的歌（不会反过来控制对方）
-                FilledTonalButton(
-                    onClick  = onToggleListenTogether,
-                    enabled  = isOnline,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(12.dp),
-                    colors   = if (isListeningTogether)
-                        ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    else ButtonDefaults.filledTonalButtonColors()
-                ) {
-                    Icon(
-                        if (isListeningTogether) Icons.Filled.Headset else Icons.Outlined.Headset,
-                        null, modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (isListeningTogether) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
-                        fontSize = 13.sp
-                    )
-                }
-                }
-            }
             }
         }
     }
+}
 
 // ── 新发现设备卡片 ────────────────────────────────────────────────
 
@@ -543,8 +543,10 @@ private fun SongPickerSheet(
     onDismiss: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var sortAscending by remember { mutableStateOf(true) }
-    var sortType by remember { mutableStateOf("Name") }
+    // 默认改成按时间排序、新的在前——传歌/备份场景下，最想先看到的通常是最近改动过的歌，
+    // 而不是按名字排序时东一个西一个混在列表中间。
+    var sortAscending by remember { mutableStateOf(false) }
+    var sortType by remember { mutableStateOf("Date") }
     var showSortMenu by remember { mutableStateOf(false) }
 
     val displaySongs = remember(songs, searchQuery, sortAscending) {

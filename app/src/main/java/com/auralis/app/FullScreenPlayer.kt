@@ -670,45 +670,45 @@ fun FullScreenPlayer(
                         }
                     )
                 }
-                    PlayerToolChip(
-                        label = abLabel,
-                        selected = abLoopEnd >= 0,
-                        onClick = {
-                            when {
-                                abLoopStart < 0 -> {
-                                    abLoopStart = currentPosition
-                                    Toast.makeText(context, context.getString(R.string.ab_point_a_set), Toast.LENGTH_SHORT).show()
-                                }
-                                abLoopEnd < 0 -> {
-                                    if (currentPosition > abLoopStart) {
-                                        abLoopEnd = currentPosition
-                                        Toast.makeText(context, context.getString(R.string.ab_point_b_set), Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, context.getString(R.string.ab_point_b_must_after_a), Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                else -> {
-                                    abLoopStart = -1L
-                                    abLoopEnd = -1L
-                                    Toast.makeText(context, context.getString(R.string.ab_cancelled), Toast.LENGTH_SHORT).show()
+                PlayerToolChip(
+                    label = abLabel,
+                    selected = abLoopEnd >= 0,
+                    onClick = {
+                        when {
+                            abLoopStart < 0 -> {
+                                abLoopStart = currentPosition
+                                Toast.makeText(context, context.getString(R.string.ab_point_a_set), Toast.LENGTH_SHORT).show()
+                            }
+                            abLoopEnd < 0 -> {
+                                if (currentPosition > abLoopStart) {
+                                    abLoopEnd = currentPosition
+                                    Toast.makeText(context, context.getString(R.string.ab_point_b_set), Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, context.getString(R.string.ab_point_b_must_after_a), Toast.LENGTH_SHORT).show()
                                 }
                             }
+                            else -> {
+                                abLoopStart = -1L
+                                abLoopEnd = -1L
+                                Toast.makeText(context, context.getString(R.string.ab_cancelled), Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    )
-                    PlayerToolChip(
-                        label = if (isFavorite) stringResource(R.string.favorite_added) else stringResource(R.string.favorite_add),
-                        selected = isFavorite,
-                        onClick = onFavoriteClick,
-                        icon = {
-                            Icon(
-                                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                    PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
+                    }
+                )
+                PlayerToolChip(
+                    label = if (isFavorite) stringResource(R.string.favorite_added) else stringResource(R.string.favorite_add),
+                    selected = isFavorite,
+                    onClick = onFavoriteClick,
+                    icon = {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
+                PlayerToolChip(label = "EQ", selected = false, onClick = { showEqDialog = true })
                 PlayerToolChip(
                     label = stringResource(R.string.action_share),
                     selected = false,
@@ -724,41 +724,41 @@ fun FullScreenPlayer(
                     },
                     icon = { Icon(Icons.Filled.Wifi, null, modifier = Modifier.size(16.dp)) }
                 )
-                    val joinedRoomHost by RoomManager.joinedHost.collectAsState()
-                    PlayerToolChip(
-                        label = if (joinedRoomHost != null) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
-                        selected = joinedRoomHost != null,
-                        onClick = {
-                            if (joinedRoomHost != null) {
-                                RoomManager.leave()
-                            } else {
-                                showListenTogetherPicker = true
-                            }
-                        },
-                        icon = {
-                            Icon(
-                                if (joinedRoomHost != null) Icons.Filled.Headset else Icons.Outlined.Headset,
-                                null,
-                                modifier = Modifier.size(16.dp)
-                            )
+                val joinedRoomHost by RoomManager.joinedHost.collectAsState()
+                PlayerToolChip(
+                    label = if (joinedRoomHost != null) stringResource(R.string.listening_together_active) else stringResource(R.string.listen_along),
+                    selected = joinedRoomHost != null,
+                    onClick = {
+                        if (joinedRoomHost != null) {
+                            RoomManager.leave()
+                        } else {
+                            showListenTogetherPicker = true
                         }
-                    )
-                    PlayerToolChip(
-                        label = stringResource(R.string.action_timer),
-                        selected = sleepTimerSeconds > 0,
-                        onClick = onSleepTimerClick,
-                        icon = {
-                            Icon(
-                                Icons.Filled.NightsStay,
-                                null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                }
+                    },
+                    icon = {
+                        Icon(
+                            if (joinedRoomHost != null) Icons.Filled.Headset else Icons.Outlined.Headset,
+                            null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+                PlayerToolChip(
+                    label = stringResource(R.string.action_timer),
+                    selected = sleepTimerSeconds > 0,
+                    onClick = onSleepTimerClick,
+                    icon = {
+                        Icon(
+                            Icons.Filled.NightsStay,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (sleepTimerSeconds > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                )
             }
+        }
 
 
         val bgModePref = remember {
@@ -899,9 +899,9 @@ fun FullScreenPlayer(
                                 modifier = Modifier.fillMaxSize()
                                     .wrapContentWidth(Alignment.CenterHorizontally)
                                     .width(volumeBarWidth).background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
-                                    CircleShape
-                                )
+                                        MaterialTheme.colorScheme.primary.copy(alpha = volumeBarAlpha),
+                                        CircleShape
+                                    )
                             )
                         }
                     }
@@ -1004,20 +1004,6 @@ fun FullScreenPlayer(
 
                             IconButton(onClick = { showCoverSelectorDialog = true }) {
                                 Icon(Icons.Filled.Image, stringResource(R.string.action_select_cover), tint = MaterialTheme.colorScheme.primary)
-                            }
-                            IconButton(onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    val songs = AppDatabase.getDatabase(context).songDao().getAllSongs().first()
-                                    withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshing_covers_start), android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                    val count = CoverArtCache.refreshAllOnlineCovers(context, songs)
-                                    withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshed_covers_count, count), android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Filled.Sync, stringResource(R.string.action_refresh_all_covers), tint = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
                                 val shareText = context.getString(R.string.share_song_text, title, artist)
@@ -1319,24 +1305,6 @@ fun FullScreenPlayer(
                                 Spacer(Modifier.width(8.dp))
                             }
 
-                            IconButton(onClick = { showCoverSelectorDialog = true }) {
-                                Icon(Icons.Filled.Image, stringResource(R.string.action_refresh_cover), tint = MaterialTheme.colorScheme.primary)
-                            }
-                            IconButton(onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    val songs = AppDatabase.getDatabase(context).songDao().getAllSongs().first()
-                                    withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshing_covers_start), android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                    val count = CoverArtCache.refreshAllOnlineCovers(context, songs)
-                                    withContext(Dispatchers.Main) {
-                                        android.widget.Toast.makeText(context, context.getString(R.string.refreshed_covers_count, count), android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Filled.Sync, stringResource(R.string.action_refresh_all_covers), tint = MaterialTheme.colorScheme.primary)
-                            }
-
                             // 👇 修复 2：竖屏同样提取颜色
                             val keepScreenOnColor =
                                 if (isKeepScreenOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(
@@ -1362,6 +1330,9 @@ fun FullScreenPlayer(
                             }
 
                             Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = { showCoverSelectorDialog = true }) {
+                                Icon(Icons.Filled.Image, stringResource(R.string.action_select_cover), tint = MaterialTheme.colorScheme.primary)
+                            }
                             IconButton(onClick = {
                                 val shareText = context.getString(R.string.share_song_text, title, artist)
                                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -2303,37 +2274,37 @@ fun FullScreenPlayer(
                                         alpha = if (isBeingDragged) 0.92f else 1f
                                     }
                                     .pointerInput(item?.mediaId) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = {
-                                            draggedItemIndex = index; dragOffsetY = 0f
-                                        },
-                                        onDragEnd = {
-                                            val from = draggedItemIndex;
-                                            val offset = dragOffsetY; draggedItemIndex =
-                                            null; dragOffsetY = 0f; if (from != null) {
-                                            val to =
-                                                (from + (offset / itemHeightPx).roundToInt()).coerceIn(
-                                                    0,
-                                                    count - 1
-                                                ); if (from != to) {
-                                                val movedItem =
-                                                    currentList.removeAt(from); currentList.add(
-                                                    to,
-                                                    movedItem
-                                                ); mediaController?.moveMediaItem(from, to)
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = {
+                                                draggedItemIndex = index; dragOffsetY = 0f
+                                            },
+                                            onDragEnd = {
+                                                val from = draggedItemIndex;
+                                                val offset = dragOffsetY; draggedItemIndex =
+                                                null; dragOffsetY = 0f; if (from != null) {
+                                                val to =
+                                                    (from + (offset / itemHeightPx).roundToInt()).coerceIn(
+                                                        0,
+                                                        count - 1
+                                                    ); if (from != to) {
+                                                    val movedItem =
+                                                        currentList.removeAt(from); currentList.add(
+                                                        to,
+                                                        movedItem
+                                                    ); mediaController?.moveMediaItem(from, to)
+                                                }
                                             }
-                                        }
-                                        },
-                                        onDragCancel = {
-                                            draggedItemIndex = null; dragOffsetY = 0f
-                                        },
-                                        onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
-                                }.clickable {
-                                    val realIdx =
-                                        (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
-                                    mediaController?.seekTo(realIdx, 0L); mediaController?.play()
-                                }; showPlaylistSheet = false
-                                },
+                                            },
+                                            onDragCancel = {
+                                                draggedItemIndex = null; dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount -> change.consume(); dragOffsetY += dragAmount.y })
+                                    }.clickable {
+                                        val realIdx =
+                                            (0 until count).find { mediaController?.getMediaItemAt(it)?.mediaId == item?.mediaId }; if (realIdx != null) {
+                                        mediaController?.seekTo(realIdx, 0L); mediaController?.play()
+                                    }; showPlaylistSheet = false
+                                    },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 PlaylistQueueRow(

@@ -76,9 +76,17 @@ class SyncService : Service() {
                     val percent = (progress * 100).toInt()
                     updateNotification(lastLog, 100, percent, false) // 实时更新进度条
                 },
-                onComplete = {
+                onComplete = { successCount, failCount ->
                     serviceScope.launch {
-                        updateNotification(getString(R.string.sync_complete_celebration), 0, 0, false)
+                        // 【关键修复】：以前不管实际下没下到东西，通知栏一律显示"同步完成"。
+                        // 现在按真实结果分三种文案：全成功才用庆祝文案，部分失败如实报数字，
+                        // 一首都没成功时格外提示检查网络/电脑那边服务是否正常。
+                        val summaryText = when {
+                            failCount == 0 -> getString(R.string.sync_complete_celebration)
+                            successCount == 0 -> "同步失败：${failCount} 首歌一首都没下成功，检查一下电脑和手机是不是在同一个局域网、电脑那边服务是否还在运行"
+                            else -> "同步完成：成功 $successCount 首，失败 $failCount 首"
+                        }
+                        updateNotification(summaryText, 0, 0, false)
 
                         // 👇 修复 1：直接在内部写一个神级工具函数，把系统的 TreeUri 转换成真实的硬盘绝对路径
                         fun getRealPathFromTreeUri(treeUri: android.net.Uri): String {
@@ -97,31 +105,36 @@ class SyncService : Service() {
                             }
                         }
 
-                        // 👇 修复 2 & 3：使用 getRealPathFromTreeUri 和 song 变量
-                        val filePaths = SyncTaskQueue.songsToDownload.mapNotNull { song ->
-                            val folderPath = getRealPathFromTreeUri(SyncTaskQueue.saveFolderUri!!)
-                            if (folderPath.isNotEmpty()) "$folderPath/${song.filename}" else null
-                        }.toTypedArray()
+                        // 只有真的成功下载过东西，才有必要去折腾 MediaScanner——一首都没成功时
+                        // 直接跳过，省得系统白扫一堆压根不存在的文件路径
+                        if (successCount > 0) {
+                            // 👇 修复 2 & 3：使用 getRealPathFromTreeUri 和 song 变量
+                            val filePaths = SyncTaskQueue.songsToDownload.mapNotNull { song ->
+                                val folderPath = getRealPathFromTreeUri(SyncTaskQueue.saveFolderUri!!)
+                                if (folderPath.isNotEmpty()) "$folderPath/${song.filename}" else null
+                            }.toTypedArray()
 
-                        // 强迫安卓系统去扫描这些刚下载好的新文件
-                        if (filePaths.isNotEmpty()) {
-                            android.media.MediaScannerConnection.scanFile(
-                                this@SyncService, // 👈 修复 context 的问题
-                                filePaths,
-                                null
-                            ) { path, uri ->
-                                android.util.Log.d("SyncService", "MediaStore registered file: $path")
+                            // 强迫安卓系统去扫描这些刚下载好的新文件
+                            if (filePaths.isNotEmpty()) {
+                                android.media.MediaScannerConnection.scanFile(
+                                    this@SyncService, // 👈 修复 context 的问题
+                                    filePaths,
+                                    null
+                                ) { path, uri ->
+                                    android.util.Log.d("SyncService", "MediaStore registered file: $path")
+                                }
                             }
+
+                            // 给系统数据库一点登记的反应时间
+                            delay(1000)
+
+                            // 任务真正完成，发送广播通知主界面刷新
+                            val broadcastIntent = Intent("com.auralis.app.SYNC_COMPLETED")
+                            sendBroadcast(broadcastIntent)
                         }
 
-                        // 给系统数据库一点登记的反应时间
-                        delay(1000)
-
-                        // 任务真正完成，发送广播通知主界面刷新
-                        val broadcastIntent = Intent("com.auralis.app.SYNC_COMPLETED")
-                        sendBroadcast(broadcastIntent)
-
-                        delay(1000)
+                        // 全部失败时通知栏多留一会儿，不然错误信息一晃就被收起来了，等于白写
+                        delay(if (failCount == 0) 1000 else 4000)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                             stopForeground(STOP_FOREGROUND_REMOVE)
                         } else {

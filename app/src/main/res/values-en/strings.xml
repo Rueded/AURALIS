@@ -494,5 +494,7 @@
     <string name="backup_success">Backup successful ✅</string>
     <string name="restore_success">Restore successful ✅ — some items may need a library rescan to show up</string>
     <string name="confirm_restore_title">Restore from the cloud?</string>
+    <string name="auto_backup_toggle_title">Auto backup</string>
+    <string name="auto_backup_toggle_subtitle">Automatically back up within a few minutes when favorites, playlists, or your NetEase cookie change</string>
     <string name="confirm_restore_body">Restoring only adds and updates data — it won\'t delete your current favorites, playlists, or history.</string>
 </resources>

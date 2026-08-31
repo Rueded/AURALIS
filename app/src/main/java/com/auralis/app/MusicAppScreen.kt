@@ -121,6 +121,16 @@ import com.auralis.app.PlayerStateHolder.dominantColor
 import com.auralis.app.ui.theme.AuralisTheme
 import kotlin.apply
 
+// 同步弹窗的排序逻辑：按时间戳或文件名排序，并支持升/降序
+private fun sortMissingSongs(list: List<SyncItem>, byDate: Boolean, ascending: Boolean): List<SyncItem> {
+    val sorted = if (byDate) {
+        list.sortedBy { it.remoteSong.dateModified }
+    } else {
+        list.sortedBy { it.remoteSong.filename.lowercase() }
+    }
+    return if (ascending) sorted else sorted.reversed()
+}
+
 // ==========================================
 @androidx.media3.common.util.UnstableApi
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, ExperimentalFoundationApi::class)
@@ -257,6 +267,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var showSelectionDialog by remember { mutableStateOf(false) }
     var showDownloadingDialog by remember { mutableStateOf(false) }
     var missingSongsList by remember { mutableStateOf<List<SyncItem>>(emptyList()) }
+    var missingSongsSortByDate by remember { mutableStateOf(true) } // true=按时间（默认），false=按名字
+    var missingSongsAscending by remember { mutableStateOf(false) } // false=降序（新→旧 / Z→A，默认），true=升序（旧→新 / A→Z）
     var syncLog by remember { mutableStateOf("") }
     var syncProgress by remember { mutableFloatStateOf(0f) }
     var showDuplicateDialog by remember { mutableStateOf(false) }
@@ -763,9 +775,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
                         val lyricsOverlayEnabled by PlayerStateHolder.lyricsOverlayEnabled.collectAsState()
                         val showOverlay = lyricsOverlayEnabled &&
-                            overlayLrcPath == currentAudioPath &&
-                            overlayLrcLines.isNotEmpty() &&
-                            lyricsOverlayDismissedFor != currentAudioPath
+                                overlayLrcPath == currentAudioPath &&
+                                overlayLrcLines.isNotEmpty() &&
+                                lyricsOverlayDismissedFor != currentAudioPath
 
                         AnimatedVisibility(
                             visible = showOverlay,
@@ -839,399 +851,397 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             HomeAmbientBackground(palette = albumPalette)
             Column(modifier = Modifier.fillMaxSize()) {
 
-            AnimatedVisibility(visible = sleepTimerSeconds > 0) {
-                SleepTimerBanner(
-                    secondsRemaining = sleepTimerSeconds,
-                    onCancel = { sleepTimerSeconds = 0L }
-                )
-            }
-
-            HomeHeader(
-                totalSongs    = allSongs.size,
-                searchQuery   = searchQuery,
-                onSearchChange = { searchQuery = it },
-                sortType      = sortType,
-                isAscending   = isAscending,
-                onSortChange  = { type, asc ->
-                    sortType = type; isAscending = asc
-                    prefs.edit().putString("sort_type", type).putBoolean("is_ascending", asc).apply()
-                },
-                onSettingsClick = { showSettingsScreen = true },
-                onSyncClick = {
-                    if (pcServerIp.endsWith(".") || savedFolderUriStr == null)
-                        showSettingsScreen = true
-                    else
-                        fetchSongsList()
+                AnimatedVisibility(visible = sleepTimerSeconds > 0) {
+                    SleepTimerBanner(
+                        secondsRemaining = sleepTimerSeconds,
+                        onCancel = { sleepTimerSeconds = 0L }
+                    )
                 }
-            )
 
-            PremiumTabBar(
-                tabs = tabs,
-                selectedIndex = pagerState.currentPage,
-                onTabSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } }
-            )
+                HomeHeader(
+                    totalSongs    = allSongs.size,
+                    searchQuery   = searchQuery,
+                    onSearchChange = { searchQuery = it },
+                    sortType      = sortType,
+                    isAscending   = isAscending,
+                    onSortChange  = { type, asc ->
+                        sortType = type; isAscending = asc
+                        prefs.edit().putString("sort_type", type).putBoolean("is_ascending", asc).apply()
+                    },
+                    onSettingsClick = { showSettingsScreen = true },
+                    onSyncClick = {
+                        if (pcServerIp.endsWith(".") || savedFolderUriStr == null)
+                            showSettingsScreen = true
+                        else
+                            fetchSongsList()
+                    }
+                )
 
-            if (!hasPermission) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(24.dp)
+                PremiumTabBar(
+                    tabs = tabs,
+                    selectedIndex = pagerState.currentPage,
+                    onTabSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } }
+                )
+
+                if (!hasPermission) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
                     ) {
-                        EmptyStateView(
-                            icon = Icons.Filled.LibraryMusic,
-                            title = stringResource(R.string.need_music_access_title),
-                            subtitle = stringResource(R.string.need_music_access_subtitle)
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        Button(onClick = { activity.requestRuntimePermissions() }) {
-                            Icon(Icons.Filled.Security, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.action_grant_permission))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            EmptyStateView(
+                                icon = Icons.Filled.LibraryMusic,
+                                title = stringResource(R.string.need_music_access_title),
+                                subtitle = stringResource(R.string.need_music_access_subtitle)
+                            )
+                            Spacer(Modifier.height(20.dp))
+                            Button(onClick = { activity.requestRuntimePermissions() }) {
+                                Icon(Icons.Filled.Security, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.action_grant_permission))
+                            }
                         }
                     }
-                }
-            } else {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalAlignment = Alignment.Top
-                ) { pageIndex ->
-                    when (pageIndex) {
-                        0, 1 -> {
-                            val currentBaseList = if (pageIndex == 0) allSongs else favSongs
-                            val currentProcessedSongs = remember(currentBaseList, searchQuery, sortType, isAscending) {
-                                val lowerQuery = searchQuery.lowercase().trim()
-                                val filtered = if (lowerQuery.isEmpty()) currentBaseList else {
-                                    val extraKeywords = qualityKeywordMap[lowerQuery] ?: listOf(lowerQuery)
-                                    currentBaseList.filter { song ->
-                                        song.title.contains(lowerQuery, true) || 
-                                        song.artist.contains(lowerQuery, true) || 
-                                        song.album.contains(lowerQuery, true) ||
-                                        (lowerQuery == "24-bit" && song.bitDepth >= 24) ||
-                                        (lowerQuery == "hi-res" && (song.bitDepth >= 24 || song.samplingRate > 48000)) ||
-                                        extraKeywords.any { kw -> song.data.lowercase().contains(kw) }
+                } else {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalAlignment = Alignment.Top
+                    ) { pageIndex ->
+                        when (pageIndex) {
+                            0, 1 -> {
+                                val currentBaseList = if (pageIndex == 0) allSongs else favSongs
+                                val currentProcessedSongs = remember(currentBaseList, searchQuery, sortType, isAscending) {
+                                    val lowerQuery = searchQuery.lowercase().trim()
+                                    val filtered = if (lowerQuery.isEmpty()) currentBaseList else {
+                                        val extraKeywords = qualityKeywordMap[lowerQuery] ?: listOf(lowerQuery)
+                                        currentBaseList.filter { song ->
+                                            song.title.contains(lowerQuery, true) ||
+                                                    song.artist.contains(lowerQuery, true) ||
+                                                    song.album.contains(lowerQuery, true) ||
+                                                    (lowerQuery == "24-bit" && song.bitDepth >= 24) ||
+                                                    (lowerQuery == "hi-res" && (song.bitDepth >= 24 || song.samplingRate > 48000)) ||
+                                                    extraKeywords.any { kw -> song.data.lowercase().contains(kw) }
+                                        }
                                     }
+                                    val sorted = when (sortType) { "Date" -> filtered.sortedBy { it.dateModified }; "Size" -> filtered.sortedBy { it.size }; else -> filtered.sortedBy { it.title } }
+                                    if (isAscending) sorted else sorted.reversed()
                                 }
-                                val sorted = when (sortType) { "Date" -> filtered.sortedBy { it.dateModified }; "Size" -> filtered.sortedBy { it.size }; else -> filtered.sortedBy { it.title } }
-                                if (isAscending) sorted else sorted.reversed()
-                            }
 
-                            // 1. 定义刷新状态
-                            var isRefreshing by remember { mutableStateOf(false) }
-                            val pullRefreshState = rememberPullToRefreshState()
+                                // 1. 定义刷新状态
+                                var isRefreshing by remember { mutableStateOf(false) }
+                                val pullRefreshState = rememberPullToRefreshState()
 
-                            // 2. 使用 PullToRefreshBox 包裹
-                            PullToRefreshBox(
-                                isRefreshing = isRefreshing,
-                                onRefresh = {
-                                    if (pageIndex == 0) {
-                                        isRefreshing = true
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
-                                            }
-                                            isRefreshing = false
-                                            android.widget.Toast.makeText(context, context.getString(R.string.list_refreshed), android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                state = pullRefreshState,
-                                modifier = Modifier.fillMaxSize(),
-                                indicator = {
-                                    if (pageIndex == 0) {
-                                        PullToRefreshDefaults.Indicator(
-                                            state = pullRefreshState,
-                                            isRefreshing = isRefreshing,
-                                            modifier = Modifier.align(Alignment.TopCenter),
-                                            containerColor = MaterialTheme.colorScheme.surface,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-                            ) {
-                                if (currentProcessedSongs.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            // 关键：即使为空也要能划动，确保能拉出刷新球
-                                            .verticalScroll(rememberScrollState()),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        EmptyStateView(
-                                            icon = if (pageIndex == 1) Icons.Filled.FavoriteBorder else Icons.Filled.MusicNote,
-                                            title = if (pageIndex == 1) stringResource(R.string.empty_favorites_title) else stringResource(R.string.empty_library_title),
-                                            subtitle = if (pageIndex == 1) stringResource(R.string.empty_favorites_subtitle) else stringResource(R.string.empty_library_subtitle)
-                                        )
-                                    }
-                                } else {
-                                    val listState = if (pageIndex == 0) mainListState else rememberLazyListState()
-
-                                    LaunchedEffect(sortType, isAscending) {
-                                        if (listState.firstVisibleItemIndex > 0) {
-                                            listState.scrollToItem(0)
-                                        }
-                                    }
-
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize(),
-                                        state = listState,
-                                        contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp)
-                                    ) {
-                                        itemsIndexed(items = currentProcessedSongs, key = { _, song -> song.data }) { index, song ->
-                                            val isCurrentSong = currentAudioPath == song.data
-                                            SongItemUI(
-                                                song = song, index = index, isCurrentSong = isCurrentSong, // 👈 传给新参数
-                                                isPlaying = isPlaying, allowMarquee = allowMarquee,
-                                                onClick = { onSongClickAction(song, index, currentProcessedSongs) },
-                                                onPlayNext = { onSongPlayNextAction(song) },
-                                                onAddToPlaylist = { songToAddToPlaylist = song },
-                                                onDelete = { onSongDeleteAction(song) },
-                                                        onShareToNearby = {
-                                                    scope.launch {
-                                                        val liveDevices = NsdHelper.discovered.value
-                                                        if (liveDevices.isEmpty()) {
-                                                            Toast.makeText(context, context.getString(R.string.no_nearby_devices), Toast.LENGTH_SHORT).show()
-                                                        } else {
-                                                            songToShareToNearby = song
-                                                        }
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        2 -> {
-                            // 之前这里只有 topSongs（按 playCount 次数排的），
-                            // 不管选哪个 tab，最新听过但只听了一两次的歌永远看不到。
-                            // 现在加个切换：按次数 / 按最近播放时间。
-                            val activeTopList = if (historySortByRecent) {
-                                recentSongs.filter { it.playCount > 0 }
-                            } else {
-                                topSongs.filter { it.playCount > 0 }
-                            }
-                            if (activeTopList.isEmpty()) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    EmptyStateView(
-                                        icon = Icons.Filled.History,
-                                        title = stringResource(R.string.no_play_history_title),
-                                        subtitle = stringResource(R.string.no_play_history_subtitle)
-                                    )
-                                }
-                            } else {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        FilterChip(
-                                            selected = !historySortByRecent,
-                                            onClick = { historySortByRecent = false },
-                                            label = { Text(stringResource(R.string.sort_by_count)) }
-                                        )
-                                        FilterChip(
-                                            selected = historySortByRecent,
-                                            onClick = { historySortByRecent = true },
-                                            label = { Text(stringResource(R.string.sort_by_recent)) }
-                                        )
-                                    }
-                                    LazyColumn(
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
-                                    ) {
-                                        itemsIndexed(items = activeTopList, key = { _, song -> song.data }) { index, song ->
-                                            TopSongRow(
-                                                rank = index,
-                                                song = song,
-                                                isCurrentSong = currentAudioPath == song.data,
-                                                isPlaying = isPlaying,
-                                                onClick = { onSongClickAction(song, index, activeTopList) }
-                                            )
-                                        }
-                                    }
-                                    ListeningStatsBanner(
-                                        totalPlays = activeTopList.sumOf { it.playCount },
-                                        uniqueSongs = activeTopList.size
-                                    )
-                                }
-                            }
-                        }
-
-                        3 -> {
-                            val lowerQuery = searchQuery.lowercase().trim()
-                            val albumGroups = remember(allSongs, lowerQuery) {
-                                allSongs.groupBy { it.album }
-                                    .toList()
-                                    .filter { it.first.lowercase().contains(lowerQuery) || it.second.any { s -> s.artist.lowercase().contains(lowerQuery) } }
-                                    .sortedBy { it.first }
-                            }
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(vertical = 8.dp)
-                            ) {
-                                items(albumGroups) { (albumName, songs) ->
-                                    AlbumRow(
-                                        albumName = albumName,
-                                        artistName = songs.firstOrNull()?.artist ?: stringResource(R.string.unknown_artist),
-                                        songCount = songs.size,
-                                        onClick = {
-                                            searchQuery = albumName
-                                            scope.launch { pagerState.animateScrollToPage(0) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        4 -> {
-                            val lowerQuery = searchQuery.lowercase().trim()
-                            val artistGroups = remember(allSongs, lowerQuery) {
-                                allSongs.groupBy { it.artist }
-                                    .toList()
-                                    .filter { it.first.lowercase().contains(lowerQuery) }
-                                    .sortedBy { it.first }
-                            }
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(vertical = 8.dp)
-                            ) {
-                                items(artistGroups) { (artistName, songs) ->
-                                    ArtistRow(
-                                        artistName = artistName,
-                                        songCount = songs.size,
-                                        onClick = {
-                                            searchQuery = artistName
-                                            scope.launch { pagerState.animateScrollToPage(0) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        5 -> {
-                            if (selectedPlaylist == null) {
-                                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                                    FilledTonalButton(
-                                        onClick = { showNewPlaylistDialog = true },
-                                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                                        shape = RoundedCornerShape(16.dp)
-                                    ) {
-                                        Icon(Icons.Default.Add, null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(stringResource(R.string.action_new_custom_playlist), fontWeight = FontWeight.SemiBold)
-                                    }
-                                    Spacer(Modifier.height(12.dp))
-                                    if (allPlaylists.isEmpty()) {
-                                        Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                                            EmptyStateView(
-                                                icon = Icons.Filled.QueueMusic,
-                                                title = stringResource(R.string.empty_playlists_title),
-                                                subtitle = stringResource(R.string.empty_playlists_subtitle)
-                                            )
-                                        }
-                                    } else {
-                                        val lowerQuery = searchQuery.lowercase().trim()
-                                        val filteredPlaylists = remember(allPlaylists, lowerQuery) {
-                                            if (lowerQuery.isEmpty()) allPlaylists
-                                            else allPlaylists.filter { it.name.lowercase().contains(lowerQuery) }
-                                        }
-                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            items(filteredPlaylists) { playlist ->
-                                                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                                                PlaylistRow(
-                                                    name = playlist.name,
-                                                    subtitle = stringResource(R.string.created_at_label, sdf.format(java.util.Date(playlist.createdAt))),
-                                                    onClick = { selectedPlaylist = playlist },
-                                                    onDelete = {
-                                                        scope.launch(Dispatchers.IO) { dao.deletePlaylist(playlist.id) }
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                val playlistSongs by dao.getSongsInPlaylist(selectedPlaylist!!.id).collectAsState(initial = emptyList())
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(onClick = { selectedPlaylist = null }) { Icon(Icons.Filled.ArrowBack, null) }
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(selectedPlaylist!!.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                        
-                                        // 👇 导出歌单按钮
-                                        IconButton(onClick = {
+                                // 2. 使用 PullToRefreshBox 包裹
+                                PullToRefreshBox(
+                                    isRefreshing = isRefreshing,
+                                    onRefresh = {
+                                        if (pageIndex == 0) {
+                                            isRefreshing = true
                                             scope.launch {
-                                                val file = MusicUtils.exportPlaylistToM3U(context, selectedPlaylist!!.name, playlistSongs)
-                                                if (file != null) {
-                                                    Toast.makeText(context, context.getString(R.string.playlist_exported_to, file.name), Toast.LENGTH_LONG).show()
-                                                } else {
-                                                    Toast.makeText(context, context.getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
+                                                withContext(Dispatchers.IO) {
+                                                    MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
                                                 }
+                                                isRefreshing = false
+                                                android.widget.Toast.makeText(context, context.getString(R.string.list_refreshed), android.widget.Toast.LENGTH_SHORT).show()
                                             }
-                                        })
- {
-                                            Icon(Icons.Default.FileDownload, stringResource(R.string.action_export_playlist))
                                         }
-
-                                        Text(stringResource(R.string.song_count_label, playlistSongs.size), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                                    },
+                                    state = pullRefreshState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    indicator = {
+                                        if (pageIndex == 0) {
+                                            PullToRefreshDefaults.Indicator(
+                                                state = pullRefreshState,
+                                                isRefreshing = isRefreshing,
+                                                modifier = Modifier.align(Alignment.TopCenter),
+                                                containerColor = MaterialTheme.colorScheme.surface,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
-                                    HorizontalDivider()
-                                    if (playlistSongs.isEmpty()) {
-                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                ) {
+                                    if (currentProcessedSongs.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                // 关键：即使为空也要能划动，确保能拉出刷新球
+                                                .verticalScroll(rememberScrollState()),
+                                            contentAlignment = Alignment.Center
+                                        ) {
                                             EmptyStateView(
-                                                icon = Icons.Filled.PlaylistAdd,
-                                                title = stringResource(R.string.empty_playlist_songs_title),
-                                                subtitle = stringResource(R.string.empty_playlist_songs_subtitle)
+                                                icon = if (pageIndex == 1) Icons.Filled.FavoriteBorder else Icons.Filled.MusicNote,
+                                                title = if (pageIndex == 1) stringResource(R.string.empty_favorites_title) else stringResource(R.string.empty_library_title),
+                                                subtitle = if (pageIndex == 1) stringResource(R.string.empty_favorites_subtitle) else stringResource(R.string.empty_library_subtitle)
                                             )
                                         }
                                     } else {
-                                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                            itemsIndexed(items = playlistSongs, key = { _, song -> song.data }) { index, song ->
+                                        val listState = if (pageIndex == 0) mainListState else rememberLazyListState()
+
+                                        LaunchedEffect(sortType, isAscending) {
+                                            if (listState.firstVisibleItemIndex > 0) {
+                                                listState.scrollToItem(0)
+                                            }
+                                        }
+
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxSize(),
+                                            state = listState,
+                                            contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp)
+                                        ) {
+                                            itemsIndexed(items = currentProcessedSongs, key = { _, song -> song.data }) { index, song ->
                                                 val isCurrentSong = currentAudioPath == song.data
                                                 SongItemUI(
                                                     song = song, index = index, isCurrentSong = isCurrentSong, // 👈 传给新参数
                                                     isPlaying = isPlaying, allowMarquee = allowMarquee,
-                                                    onClick = { onSongClickAction(song, index, playlistSongs) },
+                                                    onClick = { onSongClickAction(song, index, currentProcessedSongs) },
                                                     onPlayNext = { onSongPlayNextAction(song) },
                                                     onAddToPlaylist = { songToAddToPlaylist = song },
-                                                    onRemoveFromPlaylist = {
-                                                        scope.launch(Dispatchers.IO) {
-                                                            dao.removeSongFromPlaylist(selectedPlaylist!!.id, song.data)
-                                                            withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.removed_from_playlist), Toast.LENGTH_SHORT).show() }
+                                                    onDelete = { onSongDeleteAction(song) },
+                                                    onShareToNearby = {
+                                                        scope.launch {
+                                                            val liveDevices = NsdHelper.discovered.value
+                                                            if (liveDevices.isEmpty()) {
+                                                                Toast.makeText(context, context.getString(R.string.no_nearby_devices), Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                songToShareToNearby = song
+                                                            }
                                                         }
-                                                    },
-                                                    onDelete = { onSongDeleteAction(song) }
+                                                    }
                                                 )
                                             }
                                         }
                                     }
                                 }
-                                BackHandler(enabled = selectedPlaylist != null) { selectedPlaylist = null }
                             }
-                        }
 
-                        6 -> {
-                            HistoryScreen(onBack = {
-                                scope.launch { pagerState.animateScrollToPage(0) }
-                            })
+                            2 -> {
+                                // 之前这里只有 topSongs（按 playCount 次数排的），
+                                // 不管选哪个 tab，最新听过但只听了一两次的歌永远看不到。
+                                // 现在加个切换：按次数 / 按最近播放时间。
+                                val activeTopList = if (historySortByRecent) {
+                                    recentSongs.filter { it.playCount > 0 }
+                                } else {
+                                    topSongs.filter { it.playCount > 0 }
+                                }
+                                if (activeTopList.isEmpty()) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        EmptyStateView(
+                                            icon = Icons.Filled.History,
+                                            title = stringResource(R.string.no_play_history_title),
+                                            subtitle = stringResource(R.string.no_play_history_subtitle)
+                                        )
+                                    }
+                                } else {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            FilterChip(
+                                                selected = !historySortByRecent,
+                                                onClick = { historySortByRecent = false },
+                                                label = { Text(stringResource(R.string.sort_by_count)) }
+                                            )
+                                            FilterChip(
+                                                selected = historySortByRecent,
+                                                onClick = { historySortByRecent = true },
+                                                label = { Text(stringResource(R.string.sort_by_recent)) }
+                                            )
+                                        }
+                                        LazyColumn(
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
+                                        ) {
+                                            itemsIndexed(items = activeTopList, key = { _, song -> song.data }) { index, song ->
+                                                TopSongRow(
+                                                    rank = index,
+                                                    song = song,
+                                                    isCurrentSong = currentAudioPath == song.data,
+                                                    isPlaying = isPlaying,
+                                                    onClick = { onSongClickAction(song, index, activeTopList) }
+                                                )
+                                            }
+                                        }
+                                        ListeningStatsBanner(
+                                            totalPlays = activeTopList.sumOf { it.playCount },
+                                            uniqueSongs = activeTopList.size
+                                        )
+                                    }
+                                }
+                            }
+
+                            3 -> {
+                                val lowerQuery = searchQuery.lowercase().trim()
+                                val albumGroups = remember(allSongs, lowerQuery) {
+                                    allSongs.groupBy { it.album }
+                                        .toList()
+                                        .filter { it.first.lowercase().contains(lowerQuery) || it.second.any { s -> s.artist.lowercase().contains(lowerQuery) } }
+                                        .sortedBy { it.first }
+                                }
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 8.dp)
+                                ) {
+                                    items(albumGroups) { (albumName, songs) ->
+                                        AlbumRow(
+                                            albumName = albumName,
+                                            artistName = songs.firstOrNull()?.artist ?: stringResource(R.string.unknown_artist),
+                                            songCount = songs.size,
+                                            onClick = {
+                                                searchQuery = albumName
+                                                scope.launch { pagerState.animateScrollToPage(0) }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            4 -> {
+                                val lowerQuery = searchQuery.lowercase().trim()
+                                val artistGroups = remember(allSongs, lowerQuery) {
+                                    allSongs.groupBy { it.artist }
+                                        .toList()
+                                        .filter { it.first.lowercase().contains(lowerQuery) }
+                                        .sortedBy { it.first }
+                                }
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 8.dp)
+                                ) {
+                                    items(artistGroups) { (artistName, songs) ->
+                                        ArtistRow(
+                                            artistName = artistName,
+                                            songCount = songs.size,
+                                            onClick = {
+                                                searchQuery = artistName
+                                                scope.launch { pagerState.animateScrollToPage(0) }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            5 -> {
+                                if (selectedPlaylist == null) {
+                                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                                        FilledTonalButton(
+                                            onClick = { showNewPlaylistDialog = true },
+                                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                                            shape = RoundedCornerShape(16.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, null)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(stringResource(R.string.action_new_custom_playlist), fontWeight = FontWeight.SemiBold)
+                                        }
+                                        Spacer(Modifier.height(12.dp))
+                                        if (allPlaylists.isEmpty()) {
+                                            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                                                EmptyStateView(
+                                                    icon = Icons.Filled.QueueMusic,
+                                                    title = stringResource(R.string.empty_playlists_title),
+                                                    subtitle = stringResource(R.string.empty_playlists_subtitle)
+                                                )
+                                            }
+                                        } else {
+                                            val lowerQuery = searchQuery.lowercase().trim()
+                                            val filteredPlaylists = remember(allPlaylists, lowerQuery) {
+                                                if (lowerQuery.isEmpty()) allPlaylists
+                                                else allPlaylists.filter { it.name.lowercase().contains(lowerQuery) }
+                                            }
+                                            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                items(filteredPlaylists) { playlist ->
+                                                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                                                    PlaylistRow(
+                                                        name = playlist.name,
+                                                        subtitle = stringResource(R.string.created_at_label, sdf.format(java.util.Date(playlist.createdAt))),
+                                                        onClick = { selectedPlaylist = playlist },
+                                                        onDelete = {
+                                                            scope.launch(Dispatchers.IO) { dao.deletePlaylist(playlist.id) }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    val playlistSongs by dao.getSongsInPlaylist(selectedPlaylist!!.id).collectAsState(initial = emptyList())
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            IconButton(onClick = { selectedPlaylist = null }) { Icon(Icons.Filled.ArrowBack, null) }
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(selectedPlaylist!!.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+
+                                            // 👇 导出歌单按钮
+                                            IconButton(onClick = {
+                                                scope.launch {
+                                                    val file = MusicUtils.exportPlaylistToM3U(context, selectedPlaylist!!.name, playlistSongs)
+                                                    if (file != null) {
+                                                        Toast.makeText(context, context.getString(R.string.playlist_exported_to, file.name), Toast.LENGTH_LONG).show()
+                                                    } else {
+                                                        Toast.makeText(context, context.getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            })
+                                            {
+                                                Icon(Icons.Default.FileDownload, stringResource(R.string.action_export_playlist))
+                                            }
+
+                                            Text(stringResource(R.string.song_count_label, playlistSongs.size), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                                        }
+                                        HorizontalDivider()
+                                        if (playlistSongs.isEmpty()) {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                EmptyStateView(
+                                                    icon = Icons.Filled.PlaylistAdd,
+                                                    title = stringResource(R.string.empty_playlist_songs_title),
+                                                    subtitle = stringResource(R.string.empty_playlist_songs_subtitle)
+                                                )
+                                            }
+                                        } else {
+                                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                                itemsIndexed(items = playlistSongs, key = { _, song -> song.data }) { index, song ->
+                                                    val isCurrentSong = currentAudioPath == song.data
+                                                    SongItemUI(
+                                                        song = song, index = index, isCurrentSong = isCurrentSong, // 👈 传给新参数
+                                                        isPlaying = isPlaying, allowMarquee = allowMarquee,
+                                                        onClick = { onSongClickAction(song, index, playlistSongs) },
+                                                        onPlayNext = { onSongPlayNextAction(song) },
+                                                        onAddToPlaylist = { songToAddToPlaylist = song },
+                                                        onRemoveFromPlaylist = {
+                                                            scope.launch(Dispatchers.IO) {
+                                                                dao.removeSongFromPlaylist(selectedPlaylist!!.id, song.data)
+                                                                withContext(Dispatchers.Main) { Toast.makeText(context, context.getString(R.string.removed_from_playlist), Toast.LENGTH_SHORT).show() }
+                                                            }
+                                                        },
+                                                        onDelete = { onSongDeleteAction(song) }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    BackHandler(enabled = selectedPlaylist != null) { selectedPlaylist = null }
+                                }
+                            }
+
+                            6 -> {
+                                HistoryScreen()
+                            }
                         }
                     }
                 }
-            }
             } // hasPermission else
         } // Column
-     // Box (ambient background)
+        // Box (ambient background)
     } // Scaffold
 
     // ── 全屏播放器覆盖在 Scaffold 上面 ──
@@ -1671,6 +1681,33 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth().height(300.dp)) {
                     item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.End,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                        ) {
+                            TextButton(onClick = {
+                                missingSongsSortByDate = !missingSongsSortByDate
+                                missingSongsList = sortMissingSongs(missingSongsList, missingSongsSortByDate, missingSongsAscending)
+                            }) {
+                                Icon(Icons.Filled.Sort, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (missingSongsSortByDate) stringResource(R.string.sort_by_date) else stringResource(R.string.sort_by_name))
+                            }
+                            IconButton(
+                                onClick = {
+                                    missingSongsAscending = !missingSongsAscending
+                                    missingSongsList = sortMissingSongs(missingSongsList, missingSongsSortByDate, missingSongsAscending)
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    if (missingSongsAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+                                    contentDescription = if (missingSongsAscending) stringResource(R.string.sort_ascending) else stringResource(R.string.sort_descending),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                         val allSelected = missingSongsList.all { it.isSelected }
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { missingSongsList = missingSongsList.map { it.copy(isSelected = !allSelected) } }.padding(vertical = 8.dp)) {
                             Checkbox(checked = allSelected, onCheckedChange = null); Text(stringResource(R.string.action_select_all), fontWeight = FontWeight.Bold)
