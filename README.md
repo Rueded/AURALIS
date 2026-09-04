@@ -2,6 +2,8 @@
   <h1>🌌 A U R A L I S 音澜</h1>
   <p><b>基于 Kotlin & Jetpack Compose 的本地无损音乐播放器</b></p>
   <p>专注于准确的音频信息展示与稳定的本地播放体验</p>
+  <p><b>A Local Lossless Music Player Based on Kotlin & Jetpack Compose</b></p>
+  <p>Focused on Accurate Audio Information Display and a Stable Local Playback Experience</p>
 
 [![Platform](https://img.shields.io/badge/Platform-Android_8.0+-3DDC84?style=flat-square&logo=android)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9+-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org)
