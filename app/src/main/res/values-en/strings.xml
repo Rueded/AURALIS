@@ -162,6 +162,10 @@
     <string name="empty_library_subtitle">Pull down to refresh your local library, or add scan folders in Settings</string>
     <string name="no_play_history_title">No listening history yet</string>
     <string name="no_play_history_subtitle">Listen to a few more songs, and your top played will show up here</string>
+    <string name="empty_albums_title">No albums found</string>
+    <string name="empty_albums_subtitle">Try a different search, or pull down to refresh your library</string>
+    <string name="empty_artists_title">No artists found</string>
+    <string name="empty_artists_subtitle">Try a different search, or pull down to refresh your library</string>
     <string name="sort_by_count">By play count</string>
     <string name="sort_by_recent">By recently played</string>
     <string name="action_new_custom_playlist">New custom playlist</string>
@@ -268,6 +272,7 @@
     <string name="nearby_auralis_title">Nearby Auralis</string>
     <string name="nearby_auralis_subtitle">Transfer songs with other devices on the same Wi-Fi</string>
     <string name="theme_dynamic_cover">Follow album cover</string>
+    <string name="theme_material_you">Follow system wallpaper</string>
     <string name="theme_obsidian">Near-AMOLED black</string>
     <string name="theme_midnight">Deep navy blue</string>
     <string name="theme_amber">Warm amber brown</string>
@@ -278,6 +283,7 @@
 
     <!-- Theme preset short names -->
     <string name="preset_name_dynamic">Album Color</string>
+    <string name="preset_name_material_you">Wallpaper</string>
     <string name="preset_name_obsidian">Obsidian</string>
     <string name="preset_name_midnight">Midnight</string>
     <string name="preset_name_amber">Amber</string>
@@ -303,6 +309,7 @@
     <string name="bgmode_horizon">Deep Horizon</string>
     <string name="bgmode_classic_eq">Fine EQ (Pro)</string>
     <string name="bgmode_stardust">Stardust Flare</string>
+    <string name="bgmode_aurora">Aurora Veil</string>
 
     <!-- PC sync -->
     <string name="cannot_connect_to_pc">Can\'t connect to the PC</string>
@@ -497,4 +504,12 @@
     <string name="auto_backup_toggle_title">Auto backup</string>
     <string name="auto_backup_toggle_subtitle">Automatically back up within a few minutes when favorites, playlists, or your NetEase cookie change</string>
     <string name="confirm_restore_body">Restoring only adds and updates data — it won\'t delete your current favorites, playlists, or history.</string>
+
+    <!-- Home screen widget -->
+    <string name="widget_display_name">Auralis Playback Controls</string>
+    <string name="widget_no_song">Nothing playing</string>
+    <string name="widget_action_play">Play</string>
+    <string name="widget_action_pause">Pause</string>
+    <string name="widget_action_previous">Previous</string>
+    <string name="widget_action_next">Next</string>
 </resources>

@@ -60,6 +60,19 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- 桌面小组件：Glance 的 receiver，系统靠这个知道小组件的存在、往哪里发点击广播 -->
+        <receiver
+            android:name=".AuralisWidgetReceiver"
+            android:exported="false"
+            android:label="@string/widget_display_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/auralis_widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>

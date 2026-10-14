@@ -590,6 +590,10 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             }
         }
 
+        // ✅ 同样的思路：历史足迹的数据也趁应用启动、用户还在看首页歌曲列表的时候
+        // 就在后台提前查好，不用等用户真的划到那个 tab 才开始查库、转一圈才出内容
+        prefetchHistoryIfNeeded(context)
+
         controllerFuture.addListener({
             val controller = controllerFuture.get()
             mediaController = controller
@@ -1088,20 +1092,30 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                         .filter { it.first.lowercase().contains(lowerQuery) || it.second.any { s -> s.artist.lowercase().contains(lowerQuery) } }
                                         .sortedBy { it.first }
                                 }
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(vertical = 8.dp)
-                                ) {
-                                    items(albumGroups) { (albumName, songs) ->
-                                        AlbumRow(
-                                            albumName = albumName,
-                                            artistName = songs.firstOrNull()?.artist ?: stringResource(R.string.unknown_artist),
-                                            songCount = songs.size,
-                                            onClick = {
-                                                searchQuery = albumName
-                                                scope.launch { pagerState.animateScrollToPage(0) }
-                                            }
+                                if (albumGroups.isEmpty()) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        EmptyStateView(
+                                            icon = Icons.Filled.Album,
+                                            title = stringResource(R.string.empty_albums_title),
+                                            subtitle = stringResource(R.string.empty_albums_subtitle)
                                         )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                    ) {
+                                        items(albumGroups) { (albumName, songs) ->
+                                            AlbumRow(
+                                                albumName = albumName,
+                                                artistName = songs.firstOrNull()?.artist ?: stringResource(R.string.unknown_artist),
+                                                songCount = songs.size,
+                                                onClick = {
+                                                    searchQuery = albumName
+                                                    scope.launch { pagerState.animateScrollToPage(0) }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1114,19 +1128,29 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                         .filter { it.first.lowercase().contains(lowerQuery) }
                                         .sortedBy { it.first }
                                 }
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(vertical = 8.dp)
-                                ) {
-                                    items(artistGroups) { (artistName, songs) ->
-                                        ArtistRow(
-                                            artistName = artistName,
-                                            songCount = songs.size,
-                                            onClick = {
-                                                searchQuery = artistName
-                                                scope.launch { pagerState.animateScrollToPage(0) }
-                                            }
+                                if (artistGroups.isEmpty()) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        EmptyStateView(
+                                            icon = Icons.Filled.Person,
+                                            title = stringResource(R.string.empty_artists_title),
+                                            subtitle = stringResource(R.string.empty_artists_subtitle)
                                         )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                    ) {
+                                        items(artistGroups) { (artistName, songs) ->
+                                            ArtistRow(
+                                                artistName = artistName,
+                                                songCount = songs.size,
+                                                onClick = {
+                                                    searchQuery = artistName
+                                                    scope.launch { pagerState.animateScrollToPage(0) }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }

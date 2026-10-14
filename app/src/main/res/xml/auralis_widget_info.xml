@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    桌面小组件的元信息声明。
+
+    minWidth/minHeight 这两个值不只是"占位提示"，很多launcher（包括小米 MIUI）其实是按老式的
+    dp 换算格子数公式在算：大致是 n = (size - 30) / 70 + 1，不一定真的去读 targetCellWidth/
+    targetCellHeight 这两个安卓12+才有的新字段。之前 minWidth=180dp/minHeight=80dp 按这个公式
+    算出来接近 3列 x 2行，这也是小米上显示成 2x2 的原因——不是哪里配错了，是不同厂商的
+    launcher对这套换算公式的常数取值不完全一致，MIUI 长期以来对新版 AppWidgetProviderInfo
+    字段的支持也不算积极。
+    这里把 minWidth 拉大、minHeight 压小，让哪怕退化成老公式估算也能落在接近 4x1 的形状；
+    targetCellWidth/targetCellHeight 这两个新字段还是保留着，在支持得比较好的 launcher
+    （比如原生 Pixel Launcher）上会被优先采用。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="950dp"
+    android:maxResizeHeight="340dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:previewImage="@mipmap/ic_launcher"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout" />

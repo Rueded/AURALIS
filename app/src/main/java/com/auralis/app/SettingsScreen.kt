@@ -165,7 +165,7 @@ fun SettingsScreen(
                     }
 
                     // 👇 云糯新增：专属于“音频响应”的灵敏度滑块！
-                    AnimatedVisibility(visible = bgMode == BackgroundMode.FLUID || bgMode == BackgroundMode.HORIZON || bgMode == BackgroundMode.CLASSIC_EQ || bgMode == BackgroundMode.STARDUST ) {
+                    AnimatedVisibility(visible = bgMode == BackgroundMode.FLUID || bgMode == BackgroundMode.HORIZON || bgMode == BackgroundMode.CLASSIC_EQ || bgMode == BackgroundMode.STARDUST || bgMode == BackgroundMode.AURORA ) {
                         Column(modifier = Modifier.padding(top = 16.dp)) {
                             var sensitivity by remember { mutableFloatStateOf(prefs.getFloat("reactive_sensitivity", 1.5f)) }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
@@ -592,16 +592,22 @@ fun ThemePickerGrid(context: Context) {
     val forceDark by ThemeManager.forceDark.collectAsState()
     val isDark = forceDark ?: isSystemInDarkTheme()
 
-    val presets = listOf(
-        Triple(AuralisPreset.DYNAMIC, artworkPrimary, stringResource(R.string.theme_dynamic_cover)),
-        Triple(AuralisPreset.OBSIDIAN, Color(0xFFE2E2E2), stringResource(R.string.theme_obsidian)),
-        Triple(AuralisPreset.MIDNIGHT, Color(0xFF7EB8F7), stringResource(R.string.theme_midnight)),
-        Triple(AuralisPreset.AMBER, Color(0xFFFFB74D), stringResource(R.string.theme_amber)),
-        Triple(AuralisPreset.ROSE, Color(0xFFF48FB1), stringResource(R.string.theme_rose)),
-        Triple(AuralisPreset.AURORA, Color(0xFF69F0AE), stringResource(R.string.theme_aurora)),
-        Triple(AuralisPreset.VIOLET, Color(0xFFCE93D8), stringResource(R.string.theme_violet)),
-        Triple(AuralisPreset.SOLAR, Color(0xFFFFF176), stringResource(R.string.theme_solar))
-    )
+    val presets = buildList {
+        add(Triple(AuralisPreset.DYNAMIC, artworkPrimary, stringResource(R.string.theme_dynamic_cover)))
+        // 跟随壁纸取色只有安卓 12（S）以上才有这套系统 API，低版本设备压根不显示这个选项，
+        // 不然点了也是退化成黑曜石，等于挂了个假选项在那
+        if (ThemeManager.isMaterialYouSupported()) {
+            val materialYouAccent = ThemeManager.buildScheme(AuralisPreset.MATERIAL_YOU, artworkPrimary, customHue, isDark, context).primary
+            add(Triple(AuralisPreset.MATERIAL_YOU, materialYouAccent, stringResource(R.string.theme_material_you)))
+        }
+        add(Triple(AuralisPreset.OBSIDIAN, Color(0xFFE2E2E2), stringResource(R.string.theme_obsidian)))
+        add(Triple(AuralisPreset.MIDNIGHT, Color(0xFF7EB8F7), stringResource(R.string.theme_midnight)))
+        add(Triple(AuralisPreset.AMBER, Color(0xFFFFB74D), stringResource(R.string.theme_amber)))
+        add(Triple(AuralisPreset.ROSE, Color(0xFFF48FB1), stringResource(R.string.theme_rose)))
+        add(Triple(AuralisPreset.AURORA, Color(0xFF69F0AE), stringResource(R.string.theme_aurora)))
+        add(Triple(AuralisPreset.VIOLET, Color(0xFFCE93D8), stringResource(R.string.theme_violet)))
+        add(Triple(AuralisPreset.SOLAR, Color(0xFFFFF176), stringResource(R.string.theme_solar)))
+    }
 
     val rows = presets.chunked(2)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -609,7 +615,7 @@ fun ThemePickerGrid(context: Context) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { (preset, color, subtitle) ->
                     ThemePresetCard(
-                        preset = preset, accentColor = color, subtitle = subtitle, artworkPrimary = artworkPrimary, customHue = customHue, isDark = isDark,
+                        preset = preset, accentColor = color, subtitle = subtitle, artworkPrimary = artworkPrimary, customHue = customHue, isDark = isDark, previewContext = context,
                         isSelected = currentPreset == preset, onSelect = { ThemeManager.setPreset(preset, context) }, modifier = Modifier.weight(1f)
                     )
                 }
@@ -627,11 +633,13 @@ private fun backgroundModeDisplayName(mode: BackgroundMode): String = when (mode
     BackgroundMode.HORIZON    -> stringResource(R.string.bgmode_horizon)
     BackgroundMode.CLASSIC_EQ -> stringResource(R.string.bgmode_classic_eq)
     BackgroundMode.STARDUST   -> stringResource(R.string.bgmode_stardust)
+    BackgroundMode.AURORA     -> stringResource(R.string.bgmode_aurora)
 }
 
 @Composable
 private fun presetDisplayName(preset: AuralisPreset): String = when (preset) {
     AuralisPreset.DYNAMIC  -> stringResource(R.string.preset_name_dynamic)
+    AuralisPreset.MATERIAL_YOU -> stringResource(R.string.preset_name_material_you)
     AuralisPreset.OBSIDIAN -> stringResource(R.string.preset_name_obsidian)
     AuralisPreset.MIDNIGHT -> stringResource(R.string.preset_name_midnight)
     AuralisPreset.AMBER    -> stringResource(R.string.preset_name_amber)
@@ -645,7 +653,7 @@ private fun presetDisplayName(preset: AuralisPreset): String = when (preset) {
 
 @Composable
 private fun ThemePresetCard(
-    preset: AuralisPreset, accentColor: Color, subtitle: String, artworkPrimary: Color, customHue: Float, isDark: Boolean, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier
+    preset: AuralisPreset, accentColor: Color, subtitle: String, artworkPrimary: Color, customHue: Float, isDark: Boolean, isSelected: Boolean, onSelect: () -> Unit, modifier: Modifier = Modifier, previewContext: Context? = null
 ) {
     val borderColor by animateColorAsState(targetValue = if (isSelected) accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), label = "border")
     val bgColor by animateColorAsState(targetValue = if (isSelected) accentColor.copy(alpha = 0.08f) else Color.Transparent, label = "bg")
@@ -654,7 +662,7 @@ private fun ThemePresetCard(
         Column(modifier = Modifier.padding(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(accentColor))
-                val bgPreview = ThemeManager.buildScheme(preset, artworkPrimary, customHue, isDark).background
+                val bgPreview = ThemeManager.buildScheme(preset, artworkPrimary, customHue, isDark, previewContext).background
                 Box(modifier = Modifier.weight(1f).height(22.dp).clip(RoundedCornerShape(4.dp)).background(bgPreview))
                 if (isSelected) { Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp), tint = accentColor) }
             }

@@ -13,7 +13,7 @@ android {
         applicationId = "com.auralis.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 13
+        versionCode = 14
         versionName = "11.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -76,6 +76,12 @@ dependencies {
     implementation("net.jthink:jaudiotagger:3.0.1")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // 桌面小组件：用 Glance 而不是传统 RemoteViews 手搓 XML 布局，
+    // 复用 Compose 的写法（虽然渲染机制不同），维护成本低很多
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

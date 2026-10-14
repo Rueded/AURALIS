@@ -162,6 +162,10 @@
     <string name="empty_library_subtitle">下拉可刷新本地曲库，或在设置中添加扫描文件夹</string>
     <string name="no_play_history_title">暂无播放记录</string>
     <string name="no_play_history_subtitle">多听几首歌，这里会展示你的常听榜单</string>
+    <string name="empty_albums_title">没有找到专辑</string>
+    <string name="empty_albums_subtitle">换个搜索词试试，或下拉刷新曲库</string>
+    <string name="empty_artists_title">没有找到歌手</string>
+    <string name="empty_artists_subtitle">换个搜索词试试，或下拉刷新曲库</string>
     <string name="sort_by_count">按次数</string>
     <string name="sort_by_recent">按最近播放</string>
     <string name="action_new_custom_playlist">新建自定义歌单</string>
@@ -268,6 +272,7 @@
     <string name="nearby_auralis_title">附近的 Auralis</string>
     <string name="nearby_auralis_subtitle">在同一 WiFi 下与其他设备互传歌曲</string>
     <string name="theme_dynamic_cover">跟随专辑封面</string>
+    <string name="theme_material_you">跟随系统壁纸</string>
     <string name="theme_obsidian">近 AMOLED 纯黑</string>
     <string name="theme_midnight">深邃海军蓝</string>
     <string name="theme_amber">暖金深棕</string>
@@ -278,6 +283,7 @@
 
     <!-- 主题预设短名称（卡片主标题，跟theme_xxx的长描述是两码事） -->
     <string name="preset_name_dynamic">专辑色</string>
+    <string name="preset_name_material_you">跟随壁纸</string>
     <string name="preset_name_obsidian">黑曜石</string>
     <string name="preset_name_midnight">深海</string>
     <string name="preset_name_amber">琥珀</string>
@@ -303,6 +309,7 @@
     <string name="bgmode_horizon">深邃地平线</string>
     <string name="bgmode_classic_eq">极细 EQ (Pro)</string>
     <string name="bgmode_stardust">星云耀斑 (Flare)</string>
+    <string name="bgmode_aurora">极光绸缎 (Veil)</string>
 
     <!-- 电脑同步 -->
     <string name="cannot_connect_to_pc">无法连接到电脑</string>
@@ -497,4 +504,12 @@
     <string name="confirm_restore_body">恢复只会新增和更新数据，不会删除你现在已有的收藏、歌单或历史记录。</string>
     <string name="auto_backup_toggle_title">自动备份</string>
     <string name="auto_backup_toggle_subtitle">收藏、歌单、网易云 Cookie 等有变动时，几分钟内自动备份一次</string>
+
+    <!-- 桌面小组件 -->
+    <string name="widget_display_name">Auralis 播放控制</string>
+    <string name="widget_no_song">暂无播放</string>
+    <string name="widget_action_play">播放</string>
+    <string name="widget_action_pause">暂停</string>
+    <string name="widget_action_previous">上一首</string>
+    <string name="widget_action_next">下一首</string>
 </resources>

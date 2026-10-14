@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -173,13 +174,21 @@ class PlaybackService : MediaLibraryService() {
             }
 
             // 暂停、切歌时顺手保存一次现场：onDestroy/onTaskRemoved 不一定总会被系统调用到，
-            // 这里多存几次是廉价操作（SharedPreferences 小 JSON），换来更保险的“记忆”体验。
+            // 这里多存几次是廉价操作（SharedPreferences 小 JSON），换来更保险的"记忆"体验。
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying) savePlaybackState()
+                updateWidgetState()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 savePlaybackState()
+                updateWidgetState()
+            }
+
+            // 标题/艺术家有时会在同一个 mediaItem 内部更新（比如封面/歌词元数据异步补全），
+            // 不属于"切歌"，但小组件上显示的文字也得跟着刷新
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                updateWidgetState()
             }
         })
         player2?.addListener(object : Player.Listener {
@@ -361,6 +370,30 @@ class PlaybackService : MediaLibraryService() {
     // ─────────────────────────────────────────────────────────
 
     /** 把当前播放队列（歌曲路径列表 + 播放到第几首 + 播放到第几毫秒）存进 SharedPreferences。 */
+    /**
+     * 把当前播放状态同步给桌面小组件：标题/艺术家/播放中与否/封面。
+     * 封面直接复用 PlayerStateHolder 里已经加载好的那份（Compose ImageBitmap 转普通 Bitmap），
+     * 不重新发起一次网络/本地封面加载——同一份数据，没必要有第二条加载路径。
+     */
+    private fun updateWidgetState() {
+        try {
+            val p = player ?: return
+            val metadata = p.mediaMetadata
+            val hasActiveSession = p.mediaItemCount > 0
+            val title = metadata.title?.toString() ?: ""
+            val artist = metadata.artist?.toString() ?: ""
+            val isPlaying = p.isPlaying
+            // 封面走内存单例（Preferences 存不了 Bitmap），其余字段直接当参数传给
+            // requestUpdate，由它写进 Glance 官方的 Preferences 状态容器——
+            // 不再往 AuralisWidgetState 上塞普通 var 了，那正是之前界面死活不刷新的根源
+            AuralisWidgetState.coverBitmap = PlayerStateHolder.coverBitmap.value?.asAndroidBitmap()
+            Log.d("Auralis-Playback", "updateWidgetState: isPlaying=$isPlaying title=$title hasSession=$hasActiveSession")
+            AuralisWidgetUpdater.requestUpdate(this, title, artist, isPlaying, hasActiveSession)
+        } catch (e: Exception) {
+            Log.e("Auralis-Playback", "小组件状态更新失败", e)
+        }
+    }
+
     private fun savePlaybackState() {
         try {
             val p = player ?: return
@@ -582,6 +615,15 @@ class PlaybackService : MediaLibraryService() {
         val shadowPlayer = if (isUsingPlayer2) player  else player2
         if (mainPlayer == null || shadowPlayer == null) return
         if (!mainPlayer.isPlaying) return
+
+        // 【修复：单曲循环被淡入淡出打断】
+        // 这里原来只检查 hasNextMediaItem()——但只要播放列表里当前歌曲后面还有别的歌，
+        // 这个值就是 true，跟用户有没有开单曲循环没关系。结果就是：开着淡入淡出、又开着
+        // 单曲循环时，歌快播完那一刻直接被这段逻辑带去"下一首"做淡出淡入，
+        // 单曲循环形同虚设。ExoPlayer 自己原生就支持 REPEAT_MODE_ONE（到末尾自动跳回
+        // 本曲开头），不需要这段代码插手——单曲循环时直接跳过整个淡入淡出检测，
+        // 把控制权交还给播放器原生的循环机制。
+        if (mainPlayer.repeatMode == Player.REPEAT_MODE_ONE) return
 
         val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
         val crossfadeSecs = prefs.getFloat("crossfade_duration", 0f)

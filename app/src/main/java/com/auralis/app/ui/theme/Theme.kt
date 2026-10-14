@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.auralis.app.ThemeManager
 
 // 对 ColorScheme 每个颜色字段做动画，切歌/切主题时平滑过渡
@@ -50,9 +51,10 @@ fun AuralisTheme(content: @Composable () -> Unit) {
 
     val systemDark = isSystemInDarkTheme()
     val isDark = forceDark ?: systemDark
+    val context = LocalContext.current
 
     val colorScheme = ThemeManager
-        .buildScheme(preset, artworkPrimary, customHue, isDark)
+        .buildScheme(preset, artworkPrimary, customHue, isDark, context)
         .animated()
 
     MaterialTheme(

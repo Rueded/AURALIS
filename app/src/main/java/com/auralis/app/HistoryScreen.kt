@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -60,6 +61,28 @@ private data class HistoryPageState(
 // 同时在背后悄悄跑一次刷新，把这段时间里新产生的播放记录补上，用户全程无感。
 private var cachedHistoryState: HistoryPageState? = null
 
+// 供外部（MusicAppScreen）在 App 启动、歌曲库加载完之后主动调用一次的预取入口。
+// 目的是把"进程里头一次打开历史足迹会转圈"这个最后一次转圈也省掉——不用等用户
+// 真的点进这个 tab 才开始查库，而是趁用户还在看首页歌曲列表的时候，就在后台把
+// 历史数据提前查好、存进 cachedHistoryState。等用户真正划到历史足迹这个 tab 时，
+// 缓存早就是热的了，第一次进来也不用转圈。
+// 用 CoroutineScope(Dispatchers.IO) 而不是 suspend fun：调用方不需要等它，
+// 发起后就不用管了，加载完自然会更新 cachedHistoryState。
+private var prefetchStarted = false
+
+fun prefetchHistoryIfNeeded(context: Context) {
+    // 已经有缓存，或者已经有一次预取正在跑，就不用再发起——避免重复查库
+    if (cachedHistoryState != null || prefetchStarted) return
+    prefetchStarted = true
+    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        var state = loadYears(context, HistoryPageState())
+        if (state.selectedYear.isNotEmpty()) {
+            state = loadPeriodData(context, state).copy(isLoading = false)
+        }
+        cachedHistoryState = state
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 入口 Composable
 // ─────────────────────────────────────────────────────────────
@@ -102,7 +125,13 @@ fun HistoryScreen() {
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
         } else if (state.availableYears.isEmpty()) {
-            EmptyHistoryPlaceholder()
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyStateView(
+                    icon = Icons.Filled.History,
+                    title = stringResource(R.string.no_listening_history),
+                    subtitle = stringResource(R.string.play_some_songs_hint)
+                )
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -611,33 +640,6 @@ private fun TopSongRow(song: Song, rank: Int, context: Context) {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// 空状态
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptyHistoryPlaceholder(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("🎵", fontSize = 48.sp)
-        Spacer(Modifier.height(12.dp))
-        Text(
-            stringResource(R.string.no_listening_history),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.play_some_songs_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )
     }
 }

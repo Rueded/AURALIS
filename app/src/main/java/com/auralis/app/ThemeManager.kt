@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 
 enum class AuralisPreset(val label: String) {
     DYNAMIC("专辑色"),
+    MATERIAL_YOU("跟随壁纸"),
     OBSIDIAN("黑曜石"),
     MIDNIGHT("深海"),
     AMBER("琥珀"),
@@ -85,10 +86,21 @@ object ThemeManager {
         return hsv[0]
     }
 
-    fun buildScheme(preset: AuralisPreset, artworkPrimary: Color, customHue: Float, isDark: Boolean): ColorScheme = when (preset) {
+    // context 只有 MATERIAL_YOU 这个分支需要（读取系统壁纸取色得靠它）。设成可空、给默认值 null，
+    // 不破坏其他调用点——大部分预设根本用不上 Context。
+    // 安卓 12（S）以下没有 dynamicDarkColorScheme/dynamicLightColorScheme 这套 API，或者调用方
+    // 没传 context 进来（比如某些纯预览场景），就退化成黑曜石这套中性方案兜底，不会崩。
+    fun buildScheme(preset: AuralisPreset, artworkPrimary: Color, customHue: Float, isDark: Boolean, context: Context? = null): ColorScheme = when (preset) {
         AuralisPreset.DYNAMIC -> {
             val palette = _artworkPalette.value
             if (isDark) dynamicDark(artworkPrimary, palette) else dynamicLight(artworkPrimary, palette)
+        }
+        AuralisPreset.MATERIAL_YOU -> {
+            if (context != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                if (isDark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+            } else {
+                if (isDark) obsidianDark() else obsidianLight()
+            }
         }
         AuralisPreset.CUSTOM  -> if (isDark) hueToSchemeDark(customHue) else hueToSchemeLight(customHue)
         AuralisPreset.OBSIDIAN -> if (isDark) obsidianDark() else obsidianLight()
@@ -101,8 +113,11 @@ object ThemeManager {
         AuralisPreset.SOLAR   -> if (isDark) solarDark() else solarLight()
     }
 
+    fun isMaterialYouSupported(): Boolean = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+
     fun previewColor(preset: AuralisPreset, artworkPrimary: Color, customHue: Float): Color = when (preset) {
         AuralisPreset.DYNAMIC -> artworkPrimary
+        AuralisPreset.MATERIAL_YOU -> Color(0xFF9E9E9E) // 没有 Context 拿不到真实壁纸色，中性灰占位
         AuralisPreset.CUSTOM  -> hueToColor(customHue)
         AuralisPreset.OBSIDIAN -> Color(0xFFE2E2E2)
         AuralisPreset.MIDNIGHT -> Color(0xFF7EB8F7)
