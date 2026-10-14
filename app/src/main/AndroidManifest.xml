@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- 系统级悬浮歌词：显示在其他应用上层，需要用户在系统设置里手动授权 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".AuralisApp"
@@ -63,7 +65,7 @@
         <!-- 桌面小组件：Glance 的 receiver，系统靠这个知道小组件的存在、往哪里发点击广播 -->
         <receiver
             android:name=".AuralisWidgetReceiver"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/widget_display_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

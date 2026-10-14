@@ -1,7 +1,5 @@
 <div align="center">
   <h1>🌌 A U R A L I S 音澜</h1>
-  <p><b>Kotlin & Jetpack Compose–Based Local Lossless Music Player</b></p>
-  <p>Focused on Accurate Audio Metadata Display and a Stable Local Playback Experience</p>
   <p><b>基于 Kotlin & Jetpack Compose 的本地无损音乐播放器</b></p>
   <p>专注于准确的音频信息展示与稳定的本地播放体验</p>
 

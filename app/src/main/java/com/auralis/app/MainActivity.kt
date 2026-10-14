@@ -220,6 +220,9 @@ fun EqDialog(onDismiss: () -> Unit) {
             }
         },
         text = {
+            // 给这个对话框的窗口加上"背后模糊"的毛玻璃效果——安卓12以下自动跳过，
+            // 不影响对话框本身的显示，只是没有模糊这一层
+            ApplyDialogBlur()
             Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 // 👇 自定义预设区域
                 if (customPresets.isNotEmpty()) {
@@ -255,7 +258,7 @@ fun EqDialog(onDismiss: () -> Unit) {
                 }
 
                 if (presetNames.isNotEmpty()) {
-                    Text(stringResource(R.string.system_presets_label), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    Text(stringResource(R.string.system_presets_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         itemsIndexed(presetNames) { idx, name ->
@@ -294,7 +297,7 @@ fun EqDialog(onDismiss: () -> Unit) {
                             color = when {
                                 bandLevels[bandIdx] > 0 -> MaterialTheme.colorScheme.primary
                                 bandLevels[bandIdx] < 0 -> MaterialTheme.colorScheme.error
-                                else -> Color.Gray
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
                     }

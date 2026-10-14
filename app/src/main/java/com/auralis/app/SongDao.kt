@@ -131,6 +131,12 @@ interface SongDao {
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songPath = :songPath")
     suspend fun removeSongFromPlaylist(playlistId: Long, songPath: String)
 
+    @Query("DELETE FROM songs WHERE data = :path")
+    suspend fun deleteByPath(path: String)
+
+    @Query("DELETE FROM playlist_songs WHERE songPath = :path")
+    suspend fun deletePlaylistSongsByPath(path: String)
+
     @Query("SELECT * FROM songs WHERE data = :audioPath LIMIT 1")
     suspend fun getSongByPath(audioPath: String): Song?
 

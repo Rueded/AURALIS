@@ -239,8 +239,20 @@
     <string name="state_off">Off</string>
     <string name="crossfade_subtitle">Smooths the audio transition between tracks, no more abrupt cuts</string>
     <string name="settings_section_lyrics">Lyrics</string>
-    <string name="lyrics_overlay_subtitle">See the current lyric line above the mini player without opening the full-screen player</string>
+    <string name="lyrics_overlay_subtitle">Shown above the mini player in the app; becomes a system floating window over other apps (needs &quot;Display over other apps&quot; permission; draggable, tap to open the player)</string>
     <string name="lyrics_overlay_title">Floating Lyrics</string>
+    <string name="lyrics_overlay_preview_text">A line of floating lyrics ♪</string>
+    <string name="lyrics_overlay_style_size">Font size</string>
+    <string name="lyrics_overlay_style_width">Width</string>
+    <string name="lyrics_overlay_style_bg">Background opacity</string>
+    <string name="lyrics_overlay_style_stroke">Text outline</string>
+    <string name="lyrics_overlay_style_color">Text color</string>
+    <string name="lyrics_overlay_color_album">Album color</string>
+    <string name="lyrics_overlay_style_lock">Lock overlay</string>
+    <string name="lyrics_overlay_style_lock_sub">When locked it can\'t be dragged and taps do nothing; long-press the floating lyrics to lock/unlock, or toggle it here</string>
+    <string name="lyrics_overlay_locked_toast">Locked — long-press again to unlock</string>
+    <string name="lyrics_overlay_unlocked_toast">Unlocked — you can drag it now</string>
+    <string name="lyrics_overlay_need_permission">Please allow &quot;Display over other apps&quot; in system settings to see lyrics over other apps</string>
     <string name="online_lyrics_search_title">Online lyrics search</string>
     <string name="online_lyrics_search_subtitle">Automatically fetched online when there\'s no local LRC file</string>
     <string name="lyrics_source_priority_label">Preferred source</string>
@@ -309,7 +321,6 @@
     <string name="bgmode_horizon">Deep Horizon</string>
     <string name="bgmode_classic_eq">Fine EQ (Pro)</string>
     <string name="bgmode_stardust">Stardust Flare</string>
-    <string name="bgmode_aurora">Aurora Veil</string>
 
     <!-- PC sync -->
     <string name="cannot_connect_to_pc">Can\'t connect to the PC</string>

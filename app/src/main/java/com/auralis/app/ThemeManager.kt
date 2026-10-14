@@ -6,6 +6,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.palette.graphics.Palette
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +15,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+
+/**
+ * 保证这个颜色放在 [bg] 上至少有 [minRatio]:1 的对比度（WCAG 对比度公式）。
+ * 够了就原样返回；不够就一点点往白色混，直到够为止——色相保留，只是变浅。
+ *
+ * 为什么需要：专辑取色里 HSV 的"明度"下限（V≥0.5）不等于"看起来够亮"。
+ * 深蓝色即使 V=0.5，感知亮度也很低，放在近黑的深色背景上几乎看不见。
+ * 要按感知亮度（luminance）来保证，而不是按 HSV 的 V。
+ */
+fun Color.ensureContrastOn(bg: Color, minRatio: Float = 4.5f): Color {
+    fun ratio(a: Color, b: Color): Float {
+        val la = a.luminance(); val lb = b.luminance()
+        return (maxOf(la, lb) + 0.05f) / (minOf(la, lb) + 0.05f)
+    }
+    if (ratio(this, bg) >= minRatio) return this
+    for (i in 1..20) {
+        val c = lerp(this, Color.White, i / 20f)
+        if (ratio(c, bg) >= minRatio) return c
+    }
+    return Color.White
+}
 
 enum class AuralisPreset(val label: String) {
     DYNAMIC("专辑色"),
@@ -132,11 +155,19 @@ object ThemeManager {
     private fun hueToColor(hue: Float): Color = Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.7f, 0.85f)))
 
     // ── 专辑色 ─────────────────────────────────────────────────────────────
-    private fun dynamicDark(primary: Color, palette: AlbumPalette? = null): ColorScheme {
-        val hsv = primary.toHsv()
-        val secondary = palette?.secondary ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, hsv[1] * 0.65f, hsv[2] * 0.75f)))
-        val accent = palette?.accent ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 60f) % 360f, hsv[1] * 0.5f, hsv[2] * 0.8f)))
-        
+    private fun dynamicDark(rawPrimary: Color, palette: AlbumPalette? = null): ColorScheme {
+        val hsv = rawPrimary.toHsv()
+        val rawSecondary = palette?.secondary ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 30f) % 360f, hsv[1] * 0.65f, hsv[2] * 0.75f)))
+        val rawAccent = palette?.accent ?: Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 60f) % 360f, hsv[1] * 0.5f, hsv[2] * 0.8f)))
+
+        // 深色模式下，主色/辅色大量用来画文字和图标（歌名、MB、搜索键、标题……），
+        // 必须在深色背景上看得清；深蓝色这类感知亮度低的封面色在这里会被提亮。
+        // 背景/容器仍然用原始色相生成，不受影响。
+        val surfaceBg = Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 0.07f, 0.08f)))
+        val primary   = rawPrimary.ensureContrastOn(surfaceBg, 6.0f)   // MB 文字还会再叠 75% 透明度，所以要求高一点
+        val secondary = rawSecondary.ensureContrastOn(surfaceBg, 4.5f)
+        val accent    = rawAccent.ensureContrastOn(surfaceBg, 4.5f)
+
         return darkColorScheme(
             primary             = primary,
             onPrimary           = Color(0xFF0D0D0D),

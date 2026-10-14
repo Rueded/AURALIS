@@ -29,6 +29,7 @@ import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.LocalSize
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.color.ColorProvider
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
@@ -45,7 +46,6 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.CoroutineScope
@@ -196,7 +196,7 @@ class AuralisWidget : GlanceAppWidget() {
         Row(
             modifier = GlanceModifier
                 .fillMaxSize()
-                .background(ColorProvider(day = androidx.compose.ui.graphics.Color(0xFF1A1A1A), night = androidx.compose.ui.graphics.Color(0xFF1A1A1A)))
+                .background(ColorProvider(day = androidx.compose.ui.graphics.Color(0xFFF5F5F5), night = androidx.compose.ui.graphics.Color(0xFF1A1A1A)))
                 .cornerRadius(20.dp)
                 .padding(outerPadding),
             verticalAlignment = Alignment.Vertical.CenterVertically
@@ -207,7 +207,12 @@ class AuralisWidget : GlanceAppWidget() {
             Row(
                 modifier = GlanceModifier
                     .defaultWeight()
-                    .clickable(actionStartActivity(ComponentName(context.packageName, "com.auralis.app.MainActivity"))),
+                    .clickable(actionStartActivity(
+                        android.content.Intent(context, MainActivity::class.java).apply {
+                            action = "OPEN_PLAYER_FULLSCREEN"
+                            flags = android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                    )),
                 verticalAlignment = Alignment.Vertical.CenterVertically
             ) {
                 Box(
@@ -234,7 +239,7 @@ class AuralisWidget : GlanceAppWidget() {
                         style = TextStyle(
                             fontSize = titleFontSize,
                             fontWeight = FontWeight.Medium,
-                            color = ColorProvider(day = androidx.compose.ui.graphics.Color.White, night = androidx.compose.ui.graphics.Color.White)
+                            color = ColorProvider(day = androidx.compose.ui.graphics.Color(0xFF1A1A1A), night = androidx.compose.ui.graphics.Color.White)
                         )
                     )
                     if (hasActiveSession && artist.isNotBlank()) {
@@ -244,7 +249,7 @@ class AuralisWidget : GlanceAppWidget() {
                             maxLines = 1,
                             style = TextStyle(
                                 fontSize = artistFontSize,
-                                color = ColorProvider(day = androidx.compose.ui.graphics.Color(0xFFAAAAAA), night = androidx.compose.ui.graphics.Color(0xFFAAAAAA))
+                                color = ColorProvider(day = androidx.compose.ui.graphics.Color(0xFF666666), night = androidx.compose.ui.graphics.Color(0xFFAAAAAA))
                             )
                         )
                     }
@@ -299,7 +304,7 @@ class AuralisWidget : GlanceAppWidget() {
             modifier = GlanceModifier
                 .size(buttonSize)
                 .cornerRadius(buttonSize / 2)
-                .background(androidx.compose.ui.graphics.Color(0xFF2E2E2E))
+                .background(ColorProvider(day = androidx.compose.ui.graphics.Color(0xFFE0E0E0), night = androidx.compose.ui.graphics.Color(0xFF2E2E2E)))
                 .clickable(onClick),
             contentAlignment = Alignment.Center
         ) {
@@ -364,7 +369,7 @@ class SkipPreviousAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         try {
             withMediaController(context) { controller ->
-                if (controller.hasPreviousMediaItem()) controller.seekToPrevious()
+                controller.seekToPreviousMediaItem()
             }
         } catch (e: Exception) {
             android.util.Log.e("AuralisWidget", "上一首按钮执行失败", e)

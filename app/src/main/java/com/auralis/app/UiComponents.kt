@@ -11,6 +11,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -172,7 +174,7 @@ fun PremiumMiniPlayerBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
-            .shadow(16.dp, RoundedCornerShape(22.dp), spotColor = primary.copy(alpha = 0.25f))
+            .shadow(com.auralis.app.ui.theme.AuralisElevation.level3, RoundedCornerShape(22.dp), spotColor = primary.copy(alpha = 0.25f))
             .clip(RoundedCornerShape(22.dp))
             .clickable(onClick = onBarClick),
         shape = RoundedCornerShape(22.dp),
@@ -543,7 +545,7 @@ fun PlaylistRow(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
     ) {
@@ -660,11 +662,22 @@ fun GlowPlayButton(
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
-    val scale by animateFloatAsState(
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // 播放态本身的呼吸缩放，跟按压时的瞬时回弹是两套独立的动画叠在一起：
+    // 前者是"正在播放"的持续状态反馈，后者是"手指按下去那一下"的即时触觉回应
+    val playScale by animateFloatAsState(
         targetValue = if (isPlaying) 1.04f else 1f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
         label = "playScale"
     )
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1f,
+        animationSpec = com.auralis.app.ui.theme.AuralisMotion.snappy,
+        label = "pressScale"
+    )
+    val scale = playScale * pressScale
 
     Box(
         modifier = Modifier
@@ -680,10 +693,10 @@ fun GlowPlayButton(
         Box(
             modifier = Modifier
                 .size(size)
-                .shadow(16.dp, CircleShape, spotColor = primary.copy(alpha = 0.45f))
+                .shadow(com.auralis.app.ui.theme.AuralisElevation.level4, CircleShape, spotColor = primary.copy(alpha = 0.45f))
                 .clip(CircleShape)
                 .background(Brush.radialGradient(listOf(primary.copy(0.85f), primary)))
-                .clickable(onClick = onClick),
+                .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(

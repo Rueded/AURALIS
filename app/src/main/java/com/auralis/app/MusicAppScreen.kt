@@ -138,6 +138,7 @@ private fun sortMissingSongs(list: List<SyncItem>, byDate: Boolean, ascending: B
 fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = rememberAuralisHaptics()
 
     val prefs = remember { context.getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE) }
 
@@ -166,6 +167,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var mediaController by remember { mutableStateOf<MediaController?>(null) }
 
     var currentTitle by remember { mutableStateOf<String?>(null) }
+    // AnimatedContent / AnimatedVisibility 在退场动画期间仍会用【最新】状态重组旧内容；
+    // 如果这时 currentTitle 恰好变成 null（切歌/换播放器的瞬间），写 currentTitle!! 就会 NPE 闪退。
+    // 所以另存一份"最后一个非空标题"，退场动画里用它兜底。
+    var lastShownTitle by remember { mutableStateOf("") }
+    LaunchedEffect(currentTitle) { currentTitle?.let { lastShownTitle = it } }
     var currentArtist by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var miniProgress by remember { mutableFloatStateOf(0f) }
@@ -296,9 +302,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             android.widget.Toast.makeText(context, context.getString(R.string.file_deleted_externally_cleanup), android.widget.Toast.LENGTH_SHORT).show()
             scope.launch(Dispatchers.IO) {
                 // 从总库中删除
-                db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data))
+                dao.deleteByPath(song.data)
                 // 顺手从关联的歌单里也清掉
-                db.openHelper.writableDatabase.execSQL("DELETE FROM playlist_songs WHERE songPath = ?", arrayOf(song.data))
+                dao.deletePlaylistSongsByPath(song.data)
             }
         } else {
             // 👇 2. 文件存在，走正常的播放逻辑
@@ -387,11 +393,11 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         try {
             val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
             if (context.contentResolver.delete(uri, null, null) > 0) {
-                scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
+                scope.launch(Dispatchers.IO) { dao.deleteByPath(song.data) }
                 Toast.makeText(context, context.getString(R.string.delete_permanent_success), Toast.LENGTH_SHORT).show()
             } else {
                 if (File(song.data).delete()) {
-                    scope.launch(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DELETE FROM songs WHERE data = ?", arrayOf(song.data)) }
+                    scope.launch(Dispatchers.IO) { dao.deleteByPath(song.data) }
                     Toast.makeText(context, context.getString(R.string.delete_permanent_success), Toast.LENGTH_SHORT).show()
                 } else { Toast.makeText(context, context.getString(R.string.delete_failed_file_locked), Toast.LENGTH_SHORT).show() }
             }
@@ -616,7 +622,14 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
 
             controller.addListener(object : Player.Listener {
                 override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                    currentTitle   = mediaMetadata.title?.toString()
+                    val newTitle = mediaMetadata.title?.toString()
+                    if (newTitle == null && controller.mediaItemCount > 0) {
+                        // 播放器还有队列，只是这一瞬间元数据是空的（换播放器/切歌过渡）：不要把界面标题清成 null
+                        android.util.Log.w("Auralis-UI", "onMediaMetadataChanged: title=null 但队列还有 ${controller.mediaItemCount} 首 (state=${controller.playbackState}, idx=${controller.currentMediaItemIndex})，按过渡状态忽略")
+                        return
+                    }
+                    android.util.Log.d("Auralis-UI", "onMediaMetadataChanged: title=$newTitle items=${controller.mediaItemCount} state=${controller.playbackState} crossfading=${PlaybackService.isCrossfading}")
+                    currentTitle   = newTitle
                     currentArtist  = mediaMetadata.artist?.toString()
                     currentArtwork = mediaMetadata.artworkData
                     scope.launch(Dispatchers.IO) {
@@ -650,7 +663,16 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    currentAudioPath = mediaItem?.mediaId ?: ""
+                    val newPath = mediaItem?.mediaId ?: ""
+                    android.util.Log.d("Auralis-UI", "onMediaItemTransition: reason=$reason new=$newPath old=$currentAudioPath crossfading=${PlaybackService.isCrossfading}")
+                    // 单曲循环时 ExoPlayer 会以 REASON_REPEAT 触发此回调，但歌曲其实没变：
+                    // 此时不要清空颜色/封面/歌词状态，否则界面会变暗。
+                    // 必须"原因是 REPEAT 并且歌曲路径也没变"两个条件同时满足才跳过——
+                    // 淡入淡出换播放器/真正切到下一首时路径一定会变，永远不会被这里误拦，封面照常刷新。
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && newPath == currentAudioPath) {
+                        return
+                    }
+                    currentAudioPath = newPath
                     PlayerStateHolder.onTrackChanged(currentAudioPath)
 
                     // 👇 修复后的 ReplayGain 核心智能调音逻辑，兼容淡入淡出
@@ -764,7 +786,10 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         bottomBar = {
             AnimatedVisibility(
                 visible = currentTitle != null && !showFullScreenPlayer,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(300)),
+                enter = slideInVertically(
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+                    initialOffsetY = { it }
+                ) + fadeIn(tween(300)),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(tween(200))
             ) {
                 if (currentTitle != null) {
@@ -833,22 +858,23 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
 
                         PremiumMiniPlayerBar(
-                            title = currentTitle!!,
+                            title = currentTitle ?: lastShownTitle,
                             artist = currentArtist ?: stringResource(R.string.unknown_artist),
                             isPlaying = isPlaying,
                             coverBitmap = miniCover,
                             audioPath = currentAudioPath,
                             progress = miniProgress,
                             onPreviousClick = {
+                                haptics.tap()
                                 // 用 seekToPrevious()（而不是手动 currentMediaItemIndex - 1）
                                 // 是因为后者只会按“原始列表顺序”回退一格，
                                 // 开启随机播放(shuffle)时这跟“真正的上一首”完全对不上，
                                 // 表现就跟乱跳到别的歌一样。seekToPrevious() 会自动尊重 shuffle 顺序。
                                 mediaController?.seekToPrevious()
                             },
-                            onPlayPauseClick = { if (isPlaying) mediaController?.pause() else mediaController?.play() },
-                            onNextClick = { mediaController?.seekToNext() },
-                            onBarClick = { showFullScreenPlayer = true }
+                            onPlayPauseClick = { haptics.tap(); if (isPlaying) mediaController?.pause() else mediaController?.play() },
+                            onNextClick = { haptics.tap(); mediaController?.seekToNext() },
+                            onBarClick = { haptics.tap(); showFullScreenPlayer = true }
                         )
                     }
                 }
@@ -1220,7 +1246,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                                 Icon(Icons.Default.FileDownload, stringResource(R.string.action_export_playlist))
                                             }
 
-                                            Text(stringResource(R.string.song_count_label, playlistSongs.size), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                                            Text(stringResource(R.string.song_count_label, playlistSongs.size), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                         HorizontalDivider()
                                         if (playlistSongs.isEmpty()) {
@@ -1283,7 +1309,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         if (isVisible) {
             Box(modifier = Modifier.fillMaxSize()) {
                 FullScreenPlayer(
-                    title = currentTitle!!, artist = currentArtist ?: stringResource(R.string.unknown_artist),
+                    title = currentTitle ?: lastShownTitle, artist = currentArtist ?: stringResource(R.string.unknown_artist),
                     isPlaying = isPlaying, artwork = currentArtwork, audioPath = currentAudioPath,
                     mediaController = mediaController, repeatMode = repeatMode, shuffleMode = shuffleMode,
                     sleepTimerSeconds = sleepTimerSeconds, audioManager = audioManager,
@@ -1652,7 +1678,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                         Text(
                                             text = stringResource(R.string.replay_gain_label, String.format("%.2f dB", song.replayGain)),
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (song.replayGain != 0f) MaterialTheme.colorScheme.secondary else Color.Gray
+                                            color = if (song.replayGain != 0f) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -1740,7 +1766,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     itemsIndexed(missingSongsList) { index, item ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { val newList = missingSongsList.toMutableList(); newList[index] = item.copy(isSelected = !item.isSelected); missingSongsList = newList }.padding(vertical = 4.dp)) {
                             Checkbox(checked = item.isSelected, onCheckedChange = null)
-                            Column { Text(item.remoteSong.filename, maxLines = 1, style = MaterialTheme.typography.bodyMedium); Row { Text("${item.remoteSong.size / 1048576} MB", style = MaterialTheme.typography.bodySmall, color = Color.Gray); if (item.remoteSong.has_lrc) Text(stringResource(R.string.has_lyrics_suffix), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) } }
+                            Column { Text(item.remoteSong.filename, maxLines = 1, style = MaterialTheme.typography.bodyMedium); Row { Text("${item.remoteSong.size / 1048576} MB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (item.remoteSong.has_lrc) Text(stringResource(R.string.has_lyrics_suffix), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) } }
                         }
                     }
                 }
@@ -1794,7 +1820,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                         }
                     }
                     if (allPlaylists.isEmpty()) {
-                        item { Text(stringResource(R.string.no_custom_playlists), color = Color.Gray, modifier = Modifier.padding(16.dp)) }
+                        item { Text(stringResource(R.string.no_custom_playlists), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
                     } else {
                         items(allPlaylists) { playlist ->
                             ListItem(

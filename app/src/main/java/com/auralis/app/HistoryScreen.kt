@@ -370,9 +370,10 @@ private fun SummaryCard(totalPlays: Int, totalListenedMs: Long, selectedMonth: I
                 label = if (selectedMonth == 0) stringResource(R.string.plays_this_year) else stringResource(R.string.plays_this_month),
                 value = stringResource(R.string.plays_count_label, totalPlays)
             )
-            Divider(
-                modifier = Modifier.height(40.dp).width(1.dp).align(Alignment.CenterVertically),
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
+            Box(
+                modifier = Modifier.height(40.dp).width(1.dp)
+                    .align(Alignment.CenterVertically)
+                    .background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
             )
             SummaryStatItem(
                 label = stringResource(R.string.total_listening_label),
@@ -572,9 +573,9 @@ private fun TopSongRow(song: Song, rank: Int, context: Context) {
     }
 
     val rankColor = when (rank) {
-        1 -> Color(0xFFFFD700)
-        2 -> Color(0xFFC0C0C0)
-        3 -> Color(0xFFCD7F32)
+        1 -> Color(0xFFFFD54F)   // Gold — 统一为 UiComponents.RankBadge 的配色
+        2 -> Color(0xFFE0E0E0)   // Silver
+        3 -> Color(0xFFFFCC80)   // Bronze
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 

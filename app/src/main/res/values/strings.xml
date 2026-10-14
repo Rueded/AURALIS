@@ -239,8 +239,20 @@
     <string name="state_off">关闭</string>
     <string name="crossfade_subtitle">切歌时音频平滑过渡，消除生硬停顿</string>
     <string name="settings_section_lyrics">歌词</string>
-    <string name="lyrics_overlay_subtitle">不打开全屏播放器，也能在迷你播放条上方看当前歌词</string>
+    <string name="lyrics_overlay_subtitle">应用内显示在迷你播放条上方；切到别的应用时显示为系统悬浮窗（需授权“显示在其他应用上层”，可拖动，点击回到播放器）</string>
     <string name="lyrics_overlay_title">悬浮歌词</string>
+    <string name="lyrics_overlay_preview_text">这是一行悬浮歌词 ♪</string>
+    <string name="lyrics_overlay_style_size">字号</string>
+    <string name="lyrics_overlay_style_width">宽度</string>
+    <string name="lyrics_overlay_style_bg">背景不透明度</string>
+    <string name="lyrics_overlay_style_stroke">字体描边</string>
+    <string name="lyrics_overlay_style_color">字体颜色</string>
+    <string name="lyrics_overlay_color_album">专辑主色</string>
+    <string name="lyrics_overlay_style_lock">锁定悬浮窗</string>
+    <string name="lyrics_overlay_style_lock_sub">锁定后不能拖动、点击也无效；直接长按悬浮歌词即可锁定/解锁，也可以在这里开关</string>
+    <string name="lyrics_overlay_locked_toast">已锁定，长按再次解锁</string>
+    <string name="lyrics_overlay_unlocked_toast">已解锁，可以拖动了</string>
+    <string name="lyrics_overlay_need_permission">请在系统设置里允许“显示在其他应用上层”，切到别的应用时才能看到歌词</string>
     <string name="online_lyrics_search_title">在线歌词搜索</string>
     <string name="online_lyrics_search_subtitle">无本地 LRC 时自动联网获取</string>
     <string name="lyrics_source_priority_label">优先来源</string>
@@ -309,7 +321,6 @@
     <string name="bgmode_horizon">深邃地平线</string>
     <string name="bgmode_classic_eq">极细 EQ (Pro)</string>
     <string name="bgmode_stardust">星云耀斑 (Flare)</string>
-    <string name="bgmode_aurora">极光绸缎 (Veil)</string>
 
     <!-- 电脑同步 -->
     <string name="cannot_connect_to_pc">无法连接到电脑</string>

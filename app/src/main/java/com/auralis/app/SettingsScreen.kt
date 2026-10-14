@@ -165,7 +165,7 @@ fun SettingsScreen(
                     }
 
                     // 👇 云糯新增：专属于“音频响应”的灵敏度滑块！
-                    AnimatedVisibility(visible = bgMode == BackgroundMode.FLUID || bgMode == BackgroundMode.HORIZON || bgMode == BackgroundMode.CLASSIC_EQ || bgMode == BackgroundMode.STARDUST || bgMode == BackgroundMode.AURORA ) {
+                    AnimatedVisibility(visible = bgMode == BackgroundMode.FLUID || bgMode == BackgroundMode.HORIZON || bgMode == BackgroundMode.CLASSIC_EQ || bgMode == BackgroundMode.STARDUST ) {
                         Column(modifier = Modifier.padding(top = 16.dp)) {
                             var sensitivity by remember { mutableFloatStateOf(prefs.getFloat("reactive_sensitivity", 1.5f)) }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
@@ -246,9 +246,26 @@ fun SettingsScreen(
                             enableLyricsOverlay = it
                             prefs.edit().putBoolean("lyrics_overlay_enabled", it).apply()
                             PlayerStateHolder.setLyricsOverlayEnabled(it)
+                            // 切到别的应用也能看歌词，需要"显示在其他应用上层"权限：
+                            // 没授权就引导去系统设置页，授权后回来不用重开开关，悬浮窗会自己出现
+                            if (it && !android.provider.Settings.canDrawOverlays(context)) {
+                                Toast.makeText(context, context.getString(R.string.lyrics_overlay_need_permission), Toast.LENGTH_LONG).show()
+                                try {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                            }
                         }
                     )
                 )
+                // 悬浮歌词外观（字号/宽度/透明度/颜色/描边/锁定），开关打开时才展开
+                AnimatedVisibility(visible = enableLyricsOverlay, enter = expandVertically(tween(200)), exit = shrinkVertically(tween(200))) {
+                    LyricsOverlayStylePanel(prefs)
+                }
                 SettingsDivider()
                 SettingToggleRow(
                     item = SettingToggleItem(
@@ -295,7 +312,7 @@ fun SettingsScreen(
             }
 
             // ── 三 音乐库 ────────────────────────────────────────────────────
-            val libraryColor = Color(0xFF7C4DFF)
+            val libraryColor = MaterialTheme.colorScheme.tertiary
             SettingsSection(stringResource(R.string.settings_section_library), Icons.Outlined.LibraryMusic, libraryColor) {
                 if (allowedFolders.isEmpty()) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.scan_all_music_label), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
                 else { allowedFolders.forEachIndexed { i, folder -> if (i > 0) SettingsDivider(); Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Folder, null, tint = libraryColor, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(12.dp)); Text(folder, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2); IconButton(onClick = { onFolderRemoved(folder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Close, stringResource(R.string.action_remove), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline) } } } }
@@ -314,7 +331,7 @@ fun SettingsScreen(
             }
 
             // ── 四 连接与同步 ──────────────────────────────────────────────────
-            val syncColor = Color(0xFF00897B)
+            val syncColor = MaterialTheme.colorScheme.secondary
             SettingsSection(stringResource(R.string.settings_section_connectivity), Icons.Outlined.Wifi, syncColor) {
                 SettingToggleRow(item = SettingToggleItem(icon = Icons.Outlined.Speaker, iconTint = syncColor, title = stringResource(R.string.pc_speaker_mode_title), subtitle = if (isPcMode) stringResource(R.string.pc_speaker_mode_listening) else stringResource(R.string.pc_speaker_mode_subtitle), checked = isPcMode, onToggle = onPcModeChange))
                 SettingsDivider()
@@ -533,7 +550,7 @@ fun SettingsScreen(
             }
 
             SettingsSection(stringResource(R.string.settings_section_other), Icons.Outlined.MoreHoriz, MaterialTheme.colorScheme.outline) {
-                SettingsClickRow(icon = Icons.Outlined.Bedtime, iconTint = Color(0xFF5C6BC0), title = stringResource(R.string.sleep_timer_title), subtitle = stringResource(R.string.sleep_timer_subtitle), onClick = onShowSleepTimer)
+                SettingsClickRow(icon = Icons.Outlined.Bedtime, iconTint = MaterialTheme.colorScheme.tertiary, title = stringResource(R.string.sleep_timer_title), subtitle = stringResource(R.string.sleep_timer_subtitle), onClick = onShowSleepTimer)
                 SettingsDivider()
                 // ── 语言切换：中文 / English ──
                 val currentLang by LocalizationManager.language.collectAsState()
@@ -633,7 +650,6 @@ private fun backgroundModeDisplayName(mode: BackgroundMode): String = when (mode
     BackgroundMode.HORIZON    -> stringResource(R.string.bgmode_horizon)
     BackgroundMode.CLASSIC_EQ -> stringResource(R.string.bgmode_classic_eq)
     BackgroundMode.STARDUST   -> stringResource(R.string.bgmode_stardust)
-    BackgroundMode.AURORA     -> stringResource(R.string.bgmode_aurora)
 }
 
 @Composable
@@ -700,7 +716,7 @@ private fun SettingToggleRow(item: SettingToggleItem) {
         Spacer(Modifier.width(8.dp))
         Switch(
             checked = item.checked, onCheckedChange = { item.onToggle(it) }, enabled = item.enabled,
-            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = item.iconTint, checkedBorderColor = item.iconTint)
+            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.onPrimary, checkedTrackColor = item.iconTint, checkedBorderColor = item.iconTint)
         )
     }
 }

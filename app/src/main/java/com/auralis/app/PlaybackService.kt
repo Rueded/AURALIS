@@ -104,6 +104,7 @@ class PlaybackService : MediaLibraryService() {
     internal var isUsingPlayer2 = false
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private var systemLyricsOverlay: SystemLyricsOverlay? = null
     private var isShadowPreloading = false
     private var preloadedNextIndex = -1
 
@@ -196,7 +197,21 @@ class PlaybackService : MediaLibraryService() {
                 audioSessionId = sessionId
                 _audioSessionIdState.value = sessionId
             }
+            // 淡入淡出之后会话的播放器会换成 player2，之后的播放/切歌事件都来自它，
+            // 小组件也要跟着刷新（updateWidgetState 读取的是当前会话的播放器）
+            override fun onIsPlayingChanged(isPlaying: Boolean) { updateWidgetState() }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) { updateWidgetState() }
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) { updateWidgetState() }
         })
+
+        // 封面异步加载完成后刷新小组件（修复切歌时小组件一直显示空封面的竞态）。
+        // 必须在主线程 collect：updateWidgetState 要读 ExoPlayer，ExoPlayer 只能在创建它的
+        // 主线程访问，放在 serviceScope（IO 线程）里读会直接抛"wrong thread"、刷新全部失败。
+        serviceScope.launch(Dispatchers.Main) {
+            PlayerStateHolder.coverBitmap.collect { bitmap ->
+                if (bitmap != null) updateWidgetState()
+            }
+        }
 
         audioSessionId = builtPlayer.audioSessionId
         _audioSessionIdState.value = audioSessionId
@@ -244,6 +259,11 @@ class PlaybackService : MediaLibraryService() {
 
         crossfadeHandler.post(crossfadeCheckRunnable)
 
+        // 系统级悬浮歌词（切到别的应用也能看）。每次都取会话当前的播放器，
+        // 这样淡入淡出换了播放器实例之后进度也不会错
+        PlayerStateHolder.setLyricsOverlayEnabled(prefs.getBoolean("lyrics_overlay_enabled", true))
+        systemLyricsOverlay = SystemLyricsOverlay(this) { mediaSession?.player }.also { it.start() }
+
         // 恢复上次关闭前的播放队列/进度
         restorePlaybackState()
     }
@@ -260,7 +280,8 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         savePlaybackState()
         instance = null
-        crossfadeHandler.removeCallbacks(crossfadeCheckRunnable)
+        crossfadeHandler.removeCallbacksAndMessages(null) // 轮询 + 还没执行的延迟换播放器/渐变，一起取消
+        systemLyricsOverlay?.stop(); systemLyricsOverlay = null
         tryDisableUsbBitPerfect()
         // 释放 EQ
         equalizer?.release(); equalizer = null
@@ -377,7 +398,8 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun updateWidgetState() {
         try {
-            val p = player ?: return
+            // 淡入淡出之后真正在播的是会话当前的播放器，不一定还是 player（第一个）
+            val p = mediaSession?.player ?: player ?: return
             val metadata = p.mediaMetadata
             val hasActiveSession = p.mediaItemCount > 0
             val title = metadata.title?.toString() ?: ""
@@ -386,7 +408,11 @@ class PlaybackService : MediaLibraryService() {
             // 封面走内存单例（Preferences 存不了 Bitmap），其余字段直接当参数传给
             // requestUpdate，由它写进 Glance 官方的 Preferences 状态容器——
             // 不再往 AuralisWidgetState 上塞普通 var 了，那正是之前界面死活不刷新的根源
-            AuralisWidgetState.coverBitmap = PlayerStateHolder.coverBitmap.value?.asAndroidBitmap()
+            // 封面缩到 300px 以内再给小组件：RemoteViews 对 Bitmap 总内存有上限，大封面会让小组件整个渲染失败
+            val rawBmp = PlayerStateHolder.coverBitmap.value?.asAndroidBitmap()
+            AuralisWidgetState.coverBitmap = if (rawBmp != null && (rawBmp.width > 300 || rawBmp.height > 300)) {
+                Bitmap.createScaledBitmap(rawBmp, 300, 300, true)
+            } else rawBmp
             Log.d("Auralis-Playback", "updateWidgetState: isPlaying=$isPlaying title=$title hasSession=$hasActiveSession")
             AuralisWidgetUpdater.requestUpdate(this, title, artist, isPlaying, hasActiveSession)
         } catch (e: Exception) {
@@ -609,36 +635,108 @@ class PlaybackService : MediaLibraryService() {
             .build()
     }
 
+    // ── 淡入淡出状态机 ───────────────────────────────────────
+    // IDLE    : 没有淡入淡出
+    // PENDING : 已决定要淡入，正在等影子播放器缓冲好。这个阶段随时可以取消（比如用户又拖回前面了）
+    // RUNNING : 已经换了播放器、音量渐变进行中。这个阶段不允许任何新的淡入淡出插进来
+    private enum class FadePhase { IDLE, PENDING, RUNNING }
+    private var fadePhase = FadePhase.IDLE
+    private var fadeGeneration = 0
+    private var pendingFadeListener: Player.Listener? = null
+    private var pendingFadeShadow: ExoPlayer? = null
+    private var pendingFadeFromId: String? = null
+    private var lastFadeLogAt = 0L
+    private val fadeTag = "Auralis-Fade"
+
+    /** 日志里用 P1/P2 代替一长串对象地址，一眼看出是哪个播放器。 */
+    private fun pid(p: Player?): String = when {
+        p == null -> "null"
+        p === player -> "P1"
+        p === player2 -> "P2"
+        else -> "?"
+    }
+
+    private fun setFadePhase(newPhase: FadePhase, why: String) {
+        if (fadePhase != newPhase) {
+            Log.i(fadeTag, "phase $fadePhase -> $newPhase ($why) usingP2=$isUsingPlayer2 session=${pid(mediaSession?.player)}")
+        }
+        fadePhase = newPhase
+        isCrossfading = newPhase != FadePhase.IDLE
+    }
+
+    /** 取消一次还没真正开始的淡入淡出：摘掉等待缓冲的监听器、清空影子播放器、让过期回调作废。 */
+    private fun cancelPendingCrossfade(shadow: ExoPlayer, why: String) {
+        pendingFadeListener?.let { pendingFadeShadow?.removeListener(it) }
+        pendingFadeListener = null; pendingFadeShadow = null; pendingFadeFromId = null
+        fadeGeneration++
+        isShadowPreloading = false
+        try { shadow.pause(); shadow.stop(); shadow.clearMediaItems() } catch (e: Exception) {
+            Log.e(fadeTag, "清理影子播放器失败: ${e.message}")
+        }
+        Log.w(fadeTag, "🚫 取消待定淡入淡出: $why")
+        setFadePhase(FadePhase.IDLE, "cancel")
+    }
+
     private fun checkCrossfadeTransition() {
         if (isCurrentlyBitPerfect) return
         val mainPlayer   = if (isUsingPlayer2) player2 else player
         val shadowPlayer = if (isUsingPlayer2) player  else player2
         if (mainPlayer == null || shadowPlayer == null) return
-        if (!mainPlayer.isPlaying) return
 
-        // 【修复：单曲循环被淡入淡出打断】
-        // 这里原来只检查 hasNextMediaItem()——但只要播放列表里当前歌曲后面还有别的歌，
-        // 这个值就是 true，跟用户有没有开单曲循环没关系。结果就是：开着淡入淡出、又开着
-        // 单曲循环时，歌快播完那一刻直接被这段逻辑带去"下一首"做淡出淡入，
-        // 单曲循环形同虚设。ExoPlayer 自己原生就支持 REPEAT_MODE_ONE（到末尾自动跳回
-        // 本曲开头），不需要这段代码插手——单曲循环时直接跳过整个淡入淡出检测，
-        // 把控制权交还给播放器原生的循环机制。
-        if (mainPlayer.repeatMode == Player.REPEAT_MODE_ONE) return
+        // 渐变进行中：什么都不碰（旧代码在这里会因为"新歌位置很靠前"把标志位误清掉，
+        // 导致渐变没结束就能再触发一次淡入淡出，把播放器来回换乱）
+        if (fadePhase == FadePhase.RUNNING) return
+
+        // 会话里的播放器才是"真正在播的那个"，以它为准校正 isUsingPlayer2，不让两边对不上
+        val sessionPlayer = mediaSession?.player
+        if (sessionPlayer != null && sessionPlayer !== mainPlayer) {
+            Log.e(fadeTag, "⚠️ 主播放器与会话播放器不一致: main=${pid(mainPlayer)} session=${pid(sessionPlayer)} usingP2=$isUsingPlayer2，按会话校正")
+            isUsingPlayer2 = (sessionPlayer === player2)
+            return
+        }
+
+        if (!mainPlayer.isPlaying) {
+            if (fadePhase == FadePhase.PENDING) cancelPendingCrossfade(shadowPlayer, "主播放器已暂停")
+            return
+        }
+
+        // 单曲循环：把控制权交还 ExoPlayer 原生的 REPEAT_MODE_ONE
+        if (mainPlayer.repeatMode == Player.REPEAT_MODE_ONE) {
+            if (fadePhase == FadePhase.PENDING) cancelPendingCrossfade(shadowPlayer, "切到了单曲循环")
+            return
+        }
 
         val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
         val crossfadeSecs = prefs.getFloat("crossfade_duration", 0f)
-        if (crossfadeSecs <= 0f) return
+        if (crossfadeSecs <= 0f) {
+            if (fadePhase == FadePhase.PENDING) cancelPendingCrossfade(shadowPlayer, "淡入淡出被关闭")
+            return
+        }
 
         val crossfadeMs   = (crossfadeSecs * 1000).toLong()
         val duration      = mainPlayer.duration
         val position      = mainPlayer.currentPosition
+        if (duration <= 0) {
+            if (fadePhase == FadePhase.PENDING) cancelPendingCrossfade(shadowPlayer, "duration 未知")
+            return
+        }
+        val timeRemaining = duration - position
 
-        if (isCrossfading) {
-            if (duration <= 0 || position < duration - crossfadeMs - 2000) isCrossfading = false
-            else return
+        val now = System.currentTimeMillis()
+        if (timeRemaining <= crossfadeMs + 15000L && now - lastFadeLogAt > 1000L) {
+            lastFadeLogAt = now
+            Log.d(fadeTag, "poll phase=$fadePhase main=${pid(mainPlayer)} pos=$position dur=$duration remain=$timeRemaining crossfade=${crossfadeMs}ms preloading=$isShadowPreloading shadowState=${shadowPlayer.playbackState}")
         }
 
-        val timeRemaining = duration - position
+        // 待定阶段：用户如果又拖回前面 / 切了歌，就取消，别让过期的"缓冲好了"回调再把播放器换掉
+        if (fadePhase == FadePhase.PENDING) {
+            val sameTrack = mainPlayer.currentMediaItem?.mediaId == pendingFadeFromId
+            val nearEnd = timeRemaining in 1..(crossfadeMs + 1500L)
+            if (!sameTrack || !nearEnd) {
+                cancelPendingCrossfade(shadowPlayer, "sameTrack=$sameTrack nearEnd=$nearEnd remain=${timeRemaining}ms")
+            }
+            return
+        }
 
         if (isShadowPreloading && preloadedNextIndex != mainPlayer.nextMediaItemIndex) {
             isShadowPreloading = false
@@ -649,7 +747,7 @@ class PlaybackService : MediaLibraryService() {
         val preloadTriggerMs = crossfadeMs + 15000L
         if (timeRemaining <= preloadTriggerMs && timeRemaining > crossfadeMs &&
             mainPlayer.hasNextMediaItem() && !isShadowPreloading) {
-            Log.i("Auralis-Fade", "⏳ 提前缓冲，剩余: ${timeRemaining}ms")
+            Log.i(fadeTag, "⏳ 提前缓冲，剩余: ${timeRemaining}ms")
             isShadowPreloading = true
             preloadedNextIndex = mainPlayer.nextMediaItemIndex
             val items = (0 until mainPlayer.mediaItemCount).map { mainPlayer.getMediaItemAt(it) }
@@ -664,50 +762,75 @@ class PlaybackService : MediaLibraryService() {
             return
         }
 
-        if (timeRemaining > 0 && timeRemaining <= crossfadeMs &&
-            mainPlayer.hasNextMediaItem() && !isCrossfading) {
-            isCrossfading = true
+        if (timeRemaining > 0 && timeRemaining <= crossfadeMs && mainPlayer.hasNextMediaItem()) {
             isShadowPreloading = false
+            val gen = ++fadeGeneration
+            pendingFadeFromId = mainPlayer.currentMediaItem?.mediaId
+            setFadePhase(FadePhase.PENDING, "remain=${timeRemaining}ms main=${pid(mainPlayer)} shadowState=${shadowPlayer.playbackState}")
             val startVolume = mainPlayer.volume
 
-            val startCrossfadeRunnable = Runnable {
-                Log.i("Auralis-Fade", "🔀 启动 ${crossfadeSecs}s 淡入淡出")
+            // 真正"换播放器"之前再校验一遍：缓冲期间用户可能暂停了/拖走了/切歌了
+            val commit = Runnable {
+                val remainNow = mainPlayer.duration - mainPlayer.currentPosition
+                val stillOk = fadePhase == FadePhase.PENDING && gen == fadeGeneration &&
+                        mediaSession?.player === mainPlayer && mainPlayer.isPlaying &&
+                        mainPlayer.duration > 0 && remainNow <= crossfadeMs + 1500L
+                if (!stillOk) {
+                    cancelPendingCrossfade(shadowPlayer, "提交前校验失败 phase=$fadePhase gen=$gen/$fadeGeneration session=${pid(mediaSession?.player)} playing=${mainPlayer.isPlaying} remain=$remainNow")
+                    return@Runnable
+                }
+                pendingFadeListener = null; pendingFadeShadow = null
+                setFadePhase(FadePhase.RUNNING, "commit")
+                Log.i(fadeTag, "🔀 启动 ${crossfadeSecs}s 淡入淡出 out=${pid(mainPlayer)} in=${pid(shadowPlayer)}")
                 mainPlayer.setAudioAttributes(mainPlayer.audioAttributes, false)
                 shadowPlayer.setAudioAttributes(shadowPlayer.audioAttributes, true)
                 isUsingPlayer2 = !isUsingPlayer2
                 shadowPlayer.volume = 0f
                 shadowPlayer.play()
                 crossfadeHandler.postDelayed({
-                    mediaSession?.player = shadowPlayer
-                    val idx = mainPlayer.currentMediaItemIndex
-                    if (idx + 1 < mainPlayer.mediaItemCount)
-                        mainPlayer.removeMediaItems(idx + 1, mainPlayer.mediaItemCount)
-                    mainPlayer.repeatMode = Player.REPEAT_MODE_OFF
-                    startCrossfade(mainPlayer, shadowPlayer, crossfadeMs, startVolume)
+                    try {
+                        mediaSession?.player = shadowPlayer
+                        Log.i(fadeTag, "🔁 会话播放器已切到 ${pid(shadowPlayer)}，新歌=${shadowPlayer.currentMediaItem?.mediaId}")
+                        val idx = mainPlayer.currentMediaItemIndex
+                        if (idx + 1 < mainPlayer.mediaItemCount)
+                            mainPlayer.removeMediaItems(idx + 1, mainPlayer.mediaItemCount)
+                        mainPlayer.repeatMode = Player.REPEAT_MODE_OFF
+                        startCrossfade(mainPlayer, shadowPlayer, crossfadeMs, startVolume)
+                    } catch (e: Exception) {
+                        Log.e(fadeTag, "🔥 换播放器过程出错: ${e.message}", e)
+                        setFadePhase(FadePhase.IDLE, "swap failed")
+                    }
                 }, 50)
             }
 
             if (shadowPlayer.playbackState == Player.STATE_READY) {
-                Log.i("Auralis-Fade", "⚡ 预加载命中，完美秒切")
-                startCrossfadeRunnable.run()
+                Log.i(fadeTag, "⚡ 预加载命中，完美秒切")
+                commit.run()
             } else {
                 if (shadowPlayer.playbackState == Player.STATE_IDLE) {
                     val items = (0 until mainPlayer.mediaItemCount).map { mainPlayer.getMediaItemAt(it) }
                     shadowPlayer.setMediaItems(items, mainPlayer.nextMediaItemIndex, 0L)
                     shadowPlayer.prepare()
                 }
-                shadowPlayer.addListener(object : Player.Listener {
+                val listener = object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_READY) {
                             shadowPlayer.removeListener(this)
-                            startCrossfadeRunnable.run()
+                            if (pendingFadeListener === this) { pendingFadeListener = null; pendingFadeShadow = null }
+                            if (gen == fadeGeneration && fadePhase == FadePhase.PENDING) commit.run()
+                            else Log.w(fadeTag, "忽略过期的 READY 回调 gen=$gen/$fadeGeneration phase=$fadePhase")
                         }
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         shadowPlayer.removeListener(this)
-                        isCrossfading = false
+                        if (pendingFadeListener === this) { pendingFadeListener = null; pendingFadeShadow = null }
+                        if (gen == fadeGeneration && fadePhase == FadePhase.PENDING) {
+                            cancelPendingCrossfade(shadowPlayer, "影子播放器出错 ${error.errorCodeName}")
+                        }
                     }
-                })
+                }
+                pendingFadeListener = listener; pendingFadeShadow = shadowPlayer
+                shadowPlayer.addListener(listener)
             }
         }
     }
@@ -716,25 +839,42 @@ class PlaybackService : MediaLibraryService() {
         fadeOutPlayer: ExoPlayer, fadeInPlayer: ExoPlayer,
         durationMs: Long, startVolume: Float
     ) {
-        val startTime   = System.currentTimeMillis()
-        val fadeHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        fadeHandler.post(object : Runnable {
-            override fun run() {
-                val elapsed  = System.currentTimeMillis() - startTime
-                val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
-                val smooth   = progress * progress * (3 - 2 * progress)
-                fadeOutPlayer.volume = startVolume * (1f - smooth)
-                fadeInPlayer.volume  = targetVolume * smooth
-                if (progress < 1f) {
-                    fadeHandler.postDelayed(this, 16)
+        val startTime = System.currentTimeMillis()
+        Log.i(fadeTag, "🎚 渐变开始 out=${pid(fadeOutPlayer)} in=${pid(fadeInPlayer)} session=${pid(mediaSession?.player)} dur=${durationMs}ms")
+
+        fun finishFade() {
+            Log.i(fadeTag, "🏁 渐变结束 out=${pid(fadeOutPlayer)} in=${pid(fadeInPlayer)} session=${pid(mediaSession?.player)}")
+            try {
+                fadeInPlayer.volume = targetVolume
+                fadeOutPlayer.pause()
+                // 绝不清空"会话当前的播放器"——清空它界面就会收到 title=null
+                if (fadeOutPlayer === mediaSession?.player) {
+                    Log.e(fadeTag, "❌ 淡出的播放器就是会话当前播放器，已跳过 clearMediaItems（旧版这里会让界面标题变 null 然后闪退）")
                 } else {
-                    Log.i("Auralis-Fade", "🏁 渐变结束")
-                    fadeInPlayer.volume = targetVolume
-                    fadeOutPlayer.pause()
                     fadeOutPlayer.clearMediaItems()
-                    fadeOutPlayer.setAudioAttributes(fadeOutPlayer.audioAttributes, true)
-                    fadeOutPlayer.volume = targetVolume
-                    isCrossfading = false
+                }
+                fadeOutPlayer.setAudioAttributes(fadeOutPlayer.audioAttributes, true)
+                fadeOutPlayer.volume = targetVolume
+            } catch (e: Exception) {
+                Log.e(fadeTag, "收尾出错: ${e.message}", e)
+            } finally {
+                setFadePhase(FadePhase.IDLE, "fade finished")
+            }
+        }
+
+        // 用 crossfadeHandler 而不是新建 Handler：onDestroy 里 removeCallbacksAndMessages 能一并取消
+        crossfadeHandler.post(object : Runnable {
+            override fun run() {
+                try {
+                    val elapsed  = System.currentTimeMillis() - startTime
+                    val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+                    val smooth   = progress * progress * (3 - 2 * progress)
+                    fadeOutPlayer.volume = startVolume * (1f - smooth)
+                    fadeInPlayer.volume  = targetVolume * smooth
+                    if (progress < 1f) crossfadeHandler.postDelayed(this, 16) else finishFade()
+                } catch (e: Exception) {
+                    Log.e(fadeTag, "🔥 渐变循环出错: ${e.message}", e)
+                    setFadePhase(FadePhase.IDLE, "fade loop crashed")
                 }
             }
         })

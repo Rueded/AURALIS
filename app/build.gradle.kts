@@ -49,6 +49,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.ui:ui-text-google-fonts:1.7.6")
 
     // 👇 听哥哥的！直接上 Media3 1.10.0 满血最新版！
     val media3Version = "1.10.0"

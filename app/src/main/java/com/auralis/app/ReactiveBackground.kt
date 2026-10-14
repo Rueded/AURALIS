@@ -30,8 +30,7 @@ enum class BackgroundMode(val label: String) {
     FLUID("流体漫游"),
     HORIZON("深邃地平线"),
     CLASSIC_EQ("极细 EQ (Pro)"),
-    STARDUST("星云耀斑 (Flare)"),
-    AURORA("极光绸缎 (Veil)")
+    STARDUST("星云耀斑 (Flare)")
 }
 
 @Composable
@@ -52,7 +51,6 @@ fun ReactiveBackground(
         BackgroundMode.HORIZON    -> PremiumHorizonBackground(palette, dominantColor, surface, isPlaying, modifier, content)
         BackgroundMode.CLASSIC_EQ -> ClassicLineEqBackground(palette, dominantColor, surface, isPlaying, modifier, content)
         BackgroundMode.STARDUST   -> StardustBackground(palette, dominantColor, surface, isPlaying, modifier, content)
-        BackgroundMode.AURORA     -> AuroraVeilBackground(palette, dominantColor, surface, isPlaying, modifier, content)
     }
 }
 
@@ -263,8 +261,14 @@ private fun ClassicLineEqBackground(palette: AlbumPalette?, dominantColor: Color
         if (isPlaying) {
             while (isActive) {
                 for (i in 0 until barCount) {
-                    val bandIndex = (i * VisualizerData.fftBands.size / barCount).coerceIn(0, VisualizerData.fftBands.size - 1)
-                    val target = (VisualizerData.fftBands[bandIndex] * 5f).coerceIn(0f, 1f)
+                    // 对数映射：低频占更多柱子，高频压缩——更接近专业频谱仪
+                    val ratio = i.toFloat() / barCount
+                    val logRatio = kotlin.math.ln(1f + ratio * 9f) / kotlin.math.ln(10f)
+                    val bandIndex = (logRatio * (VisualizerData.fftBands.size - 1)).toInt()
+                        .coerceIn(0, VisualizerData.fftBands.size - 1)
+                    // 高频补偿：ratio 越大（越靠右），增益越高，让后面的柱子也能明显跳动
+                    val freqBoost = 1f + ratio * 4f
+                    val target = (VisualizerData.fftBands[bandIndex] * 5f * freqBoost).coerceIn(0f, 1f)
                     barHeights[i] += (if (target > barHeights[i]) 0.5f else 0.12f) * (target - barHeights[i])
                 }
                 delay(16L)
@@ -389,11 +393,11 @@ private fun AppleFluidBackground(palette: AlbumPalette?, dominantColor: Color, s
     // 瞬态量只贡献一点点额外点缀，听感上是"跟着节奏一起收缩舒张"，不再是忽然炸开。
     val orbs = remember {
         listOf(
-            FluidOrb(0.20f, 0.25f, 0.12f, 0.08f, 14000, 0f,   0.15f, true),
-            FluidOrb(0.75f, 0.30f, 0.10f, 0.10f, 18000, 90f,  0.13f, false),
-            FluidOrb(0.35f, 0.68f, 0.14f, 0.09f, 21000, 180f, 0.12f, true),
-            FluidOrb(0.80f, 0.72f, 0.09f, 0.12f, 16000, 260f, 0.14f, false),
-            FluidOrb(0.55f, 0.45f, 0.11f, 0.11f, 24000, 45f,  0.10f, true)
+            FluidOrb(0.20f, 0.25f, 0.12f, 0.08f, 14000, 0f,   0.24f, true),
+            FluidOrb(0.75f, 0.30f, 0.10f, 0.10f, 18000, 90f,  0.21f, false),
+            FluidOrb(0.35f, 0.68f, 0.14f, 0.09f, 21000, 180f, 0.19f, true),
+            FluidOrb(0.80f, 0.72f, 0.09f, 0.12f, 16000, 260f, 0.22f, false),
+            FluidOrb(0.55f, 0.45f, 0.11f, 0.11f, 24000, 45f,  0.17f, true)
         )
     }
     val orbPhases = orbs.map { orb ->
@@ -410,86 +414,20 @@ private fun AppleFluidBackground(palette: AlbumPalette?, dominantColor: Color, s
             val cx = size.width * orb.baseXRatio + sin(rad).toFloat() * size.width * orb.orbitXRatio
             val cy = size.height * orb.baseYRatio + cos(rad).toFloat() * size.height * orb.orbitYRatio
             val radius = size.maxDimension * orb.sizeRatio * pulse
-            val alpha = (0.16f + levels.smooth * 0.18f + levels.burst * 0.08f).coerceIn(0f, 0.55f)
+            val alpha = (0.10f + levels.smooth * 0.12f + levels.burst * 0.05f).coerceIn(0f, 0.32f)
             val color = if (orb.useLeftColor) colorLeft else colorRight
             drawCircle(
-                Brush.radialGradient(listOf(color.copy(alpha = alpha), Color.Transparent), center = Offset(cx, cy), radius = radius),
+                Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to color.copy(alpha = alpha),
+                        0.35f to color.copy(alpha = alpha * 0.6f),
+                        0.65f to color.copy(alpha = alpha * 0.25f),
+                        1.0f to Color.Transparent
+                    ),
+                    center = Offset(cx, cy), radius = radius
+                ),
                 radius, Offset(cx, cy)
             )
-        }
-    }) { content() }
-}
-
-// ==========================================
-// 极光绸缎（新方案）—— 几条柔光丝带缓慢流动，连续包络驱动亮度/幅度，不用瞬态尖峰
-// ==========================================
-private data class AuroraRibbon(
-    val baseYRatio: Float, val amplitudeRatio: Float, val frequency: Float,
-    val periodMs: Int, val thicknessRatio: Float, val colorIndex: Int
-)
-
-@Composable
-private fun AuroraVeilBackground(palette: AlbumPalette?, dominantColor: Color, surface: Color, isPlaying: Boolean, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
-    val levels = rememberAudioLevels(isPlaying)
-    val infiniteTransition = rememberInfiniteTransition(label = "aurora")
-
-    val colors = listOf(
-        dominantColor,
-        palette?.secondary ?: dominantColor,
-        palette?.accent ?: dominantColor
-    )
-
-    val ribbons = remember {
-        listOf(
-            AuroraRibbon(0.30f, 0.06f, 1.6f, 22000, 0.10f, 0),
-            AuroraRibbon(0.48f, 0.08f, 1.1f, 28000, 0.14f, 1),
-            AuroraRibbon(0.65f, 0.05f, 2.0f, 19000, 0.09f, 2)
-        )
-    }
-    val ribbonPhases = ribbons.map { r ->
-        infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(r.periodMs, easing = LinearEasing)), label = "ribbonPhase")
-    }
-
-    Box(modifier = modifier.drawBehind {
-        drawRect(dominantColor.copy(alpha = 0.06f))
-
-        val glow = 0.55f + levels.smooth * 0.5f
-
-        ribbons.forEachIndexed { idx, ribbon ->
-            val radPhase = Math.toRadians(ribbonPhases[idx].value.toDouble()).toFloat()
-            val color = colors[ribbon.colorIndex % colors.size]
-            val baseY = size.height * ribbon.baseYRatio
-            val amp = size.height * ribbon.amplitudeRatio * (0.7f + levels.smooth * 0.5f)
-            val thickness = size.height * ribbon.thicknessRatio * (0.8f + levels.smooth * 0.3f)
-
-            val path = Path()
-            var started = false
-            var x = 0f
-            while (x <= size.width) {
-                val nx = x / size.width
-                val y = baseY +
-                        sin(nx * ribbon.frequency * 2f * PI.toFloat() + radPhase) * amp +
-                        sin(nx * ribbon.frequency * 5f * PI.toFloat() - radPhase * 1.7f) * amp * 0.25f
-                if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
-                x += 12f
-            }
-
-            val brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, color.copy(alpha = (0.35f * glow).coerceIn(0f, 1f)), Color.Transparent),
-                startY = baseY - thickness, endY = baseY + thickness
-            )
-            drawPath(path, brush = brush, style = Stroke(width = thickness))
-
-            if (levels.burst > 0.35f) {
-                val sparkleNx = (ribbonPhases[idx].value % 100f) / 100f
-                val sparkleX = size.width * sparkleNx
-                val sparkleY = baseY + sin(sparkleNx * ribbon.frequency * 2f * PI.toFloat() + radPhase) * amp
-                drawCircle(
-                    color.copy(alpha = (levels.burst * 0.6f).coerceIn(0f, 1f)),
-                    radius = 3f + levels.burst * 4f,
-                    center = Offset(sparkleX, sparkleY)
-                )
-            }
         }
     }) { content() }
 }

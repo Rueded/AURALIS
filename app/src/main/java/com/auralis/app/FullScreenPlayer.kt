@@ -148,6 +148,9 @@ fun FullScreenPlayer(
     ) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
+        // 触感反馈统一入口——播放/暂停、切歌、收藏这些核心交互都从这里发反馈，
+        // 之前整个项目一次都没用过触感，这是最先接入的几个高曝光交互点
+        val haptics = rememberAuralisHaptics()
         // 👇 之前这里用 LocalConfiguration.current.orientation 判断横竖屏，
         // 但这台设备上无论怎么转屏幕，读到的值好像都不会变化（不确定是哪一层没有正确
         // 传播 Configuration 更新）。直接测量 BoxWithConstraints 给出的实际可用宽高，
@@ -565,6 +568,7 @@ fun FullScreenPlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
+                    haptics.toggle()
                     if (shuffleMode) {
                         mediaController?.shuffleModeEnabled = false; mediaController?.repeatMode =
                             Player.REPEAT_MODE_OFF
@@ -594,6 +598,7 @@ fun FullScreenPlayer(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = {
+                        haptics.tap()
                         // 注意：不要用 currentMediaItemIndex - 1 手动回退！
                         // 那是“原始列表顺序”的上一格，开启随机播放(shuffle)后
                         // 跟真正播放过的上一首完全不是一回事，体验上就像是又跳到了下一首。
@@ -609,6 +614,7 @@ fun FullScreenPlayer(
                     GlowPlayButton(
                         isPlaying = isPlaying,
                         onClick = {
+                            haptics.tap()
                             if (isPlaying) mediaController?.pause() else {
                                 mediaController?.play()
                                 isLyricsPausedForInteraction = false
@@ -617,7 +623,7 @@ fun FullScreenPlayer(
                         size = if (isLandscapeLayout) 64.dp else 72.dp,
                         iconSize = if (isLandscapeLayout) 32.dp else 36.dp
                     )
-                    IconButton(onClick = { mediaController?.seekToNext() }) {
+                    IconButton(onClick = { haptics.tap(); mediaController?.seekToNext() }) {
                         Icon(
                             Icons.Filled.SkipNext,
                             null,
@@ -704,7 +710,7 @@ fun FullScreenPlayer(
                             if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                             null,
                             modifier = Modifier.size(16.dp),
-                            tint = if (isFavorite) Color(0xFFE91E63) else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (isFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 )
@@ -985,7 +991,7 @@ fun FullScreenPlayer(
                                 )
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .clickable { isKeepScreenOn = !isKeepScreenOn },
                                 contentAlignment = Alignment.Center
@@ -1111,6 +1117,7 @@ fun FullScreenPlayer(
                                     val path = targetKey.substringBefore("?nonce=")
                                     val lowResPlaceholder = remember(path) { AudioCache.getFromMemory(path)?.bitmap }
 
+
                                     // 💡 修复：直接挂载复合 targetKey，一旦点击刷新，高清图槽位立即清空重载
                                     var highResBitmap by remember(targetKey) { mutableStateOf<ImageBitmap?>(null) }
 
@@ -1151,6 +1158,7 @@ fun FullScreenPlayer(
                                         detectTapGestures(
                                             onDoubleTap = {
                                                 if (!isFavorite) {
+                                                    haptics.confirm()
                                                     onFavoriteClick()
                                                     Toast.makeText(
                                                         context,
@@ -1312,7 +1320,7 @@ fun FullScreenPlayer(
                                 )
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .clickable { isKeepScreenOn = !isKeepScreenOn },
                                 contentAlignment = Alignment.Center
@@ -1425,6 +1433,7 @@ fun FullScreenPlayer(
                                 val path = targetKey.substringBefore("?nonce=")
                                 val lowResPlaceholder = remember(path) { AudioCache.getFromMemory(path)?.bitmap }
 
+
                                 // 💡 修复：直接挂载复合 targetKey，一旦点击刷新，高清图槽位立即清空重载
                                 var highResBitmap by remember(targetKey) { mutableStateOf<ImageBitmap?>(null) }
 
@@ -1465,6 +1474,7 @@ fun FullScreenPlayer(
                                     detectTapGestures(
                                         onDoubleTap = {
                                             if (!isFavorite) {
+                                                haptics.confirm()
                                                 onFavoriteClick()
                                                 Toast.makeText(
                                                     context,
@@ -1554,6 +1564,7 @@ fun FullScreenPlayer(
                 }
             },
             text = {
+                ApplyDialogBlur()
                 Column(
                     modifier = Modifier
                         .verticalScroll(rememberScrollState())
