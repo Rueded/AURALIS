@@ -544,7 +544,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
             val joined = RoomManager.joinedHost.value
             val controller = mediaController
             if (joined != null && controller != null) {
-                val state = withContext(Dispatchers.IO) { fetchRoomState(joined) }
+                val state = withContext(Dispatchers.IO) { fetchRoomState(context, joined) }
                 RoomManager.setRemoteState(state)
                 if (state != null) {
                     if (state.filename == missingFilename) {
@@ -586,13 +586,16 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
 
         // 启动 Auralis 局域网服务
         withContext(Dispatchers.IO) {
-            try {
-                AuralisServer(context).start()
-                NsdHelper.register(context)
-                // ✅ 应用启动就开始扫描，而不是等打开 NearbyScreen 才扫
-                NsdHelper.startDiscovery(context)
-            } catch (e: Exception) {
+            // 三件事分开 try：服务器绑定失败不能连带让"注册 / 扫描"也被跳过
+            try { AuralisServer.ensureStarted(context) } catch (e: Exception) {
                 android.util.Log.e("MusicApp", "AuralisServer 启动失败: ${e.message}")
+            }
+            try { NsdHelper.register(context) } catch (e: Exception) {
+                android.util.Log.e("MusicApp", "NSD 注册失败: ${e.message}")
+            }
+            // ✅ 应用启动就开始扫描，而不是等打开 NearbyScreen 才扫
+            try { NsdHelper.startDiscovery(context) } catch (e: Exception) {
+                android.util.Log.e("MusicApp", "NSD 扫描启动失败: ${e.message}")
             }
         }
 
@@ -1377,7 +1380,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showSleepTimerDialog = false }) { Text(stringResource(R.string.action_close)) } }
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+ TextButton(onClick = { showSleepTimerDialog = false }) { Text(stringResource(R.string.action_close)) } }
         )
     }
 
@@ -1479,7 +1484,7 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
         val receiveEnabled = prefs.getBoolean("auralis_receive_enabled", true)
         if (receiveEnabled) {
             var isDownloading by remember { mutableStateOf(false) }
-            var downloadProgress by remember { mutableFloatStateOf(0f) }
+            var transfer by remember { mutableStateOf(TransferProgress()) }
 
             if (isDownloading) {
                 // 下载中：显示进度弹窗
@@ -1493,27 +1498,48 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                push.songTitle,
+                                if (transfer.totalFiles > 1)
+                                    stringResource(R.string.nearby_receiving_count, minOf(transfer.doneFiles + 1, transfer.totalFiles), transfer.totalFiles)
+                                else push.songTitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(Modifier.height(20.dp))
-                            LinearProgressIndicator(
-                                progress = { downloadProgress },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
+                            // 总大小未知时（旧版发送方 + 单首）用不确定进度条，而不是一根永远不动的 0%
+                            if (transfer.determinate) {
+                                LinearProgressIndicator(
+                                    progress = { transfer.fraction },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+                            }
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "${(downloadProgress * 100).toInt()}%",
+                                buildString {
+                                    if (transfer.determinate) append("${(transfer.fraction * 100).toInt()}%")
+                                    if (transfer.totalBytes > 0) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("${formatTransferBytes(transfer.bytes)} / ${formatTransferBytes(transfer.totalBytes)}")
+                                    }
+                                    if (transfer.speedBps > 0) append(" · ${formatTransferBytes(transfer.speedBps)}/s")
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                     },
-                    confirmButton = {}
+                    confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+}
                 )
             } else {
                 IncomingPushDialog(
@@ -1524,17 +1550,18 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                             val folder = android.os.Environment
                                 .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC)
                                 .absolutePath
-                            val ok = downloadFromPeer(context, push, folder) { p ->
-                                downloadProgress = p
-                            }
+                            val result = downloadBatch(context, push, folder) { p -> transfer = p }
+                            val ok = result.ok > 0
                             withContext(Dispatchers.Main) {
                                 isDownloading = false
                                 AuralisPushManager.consume()
-                                Toast.makeText(
-                                    context,
-                                    if (ok) context.getString(R.string.received_song, push.songTitle) else context.getString(R.string.download_failed),
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                val msg = when {
+                                    result.ok == 0 -> context.getString(R.string.download_failed)
+                                    result.failed > 0 -> context.getString(R.string.nearby_received_partial, result.ok, result.failed)
+                                    result.ok > 1 -> context.getString(R.string.nearby_received_batch, result.ok)
+                                    else -> context.getString(R.string.received_song, push.songTitle)
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 if (ok) scope.launch {
                                     MusicUtils.syncLocalMusicToDatabase(context, dao, allowedFolders)
                                 }
@@ -1689,7 +1716,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showDuplicateDialog = false }) { Text(stringResource(R.string.action_close)) } }
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+ TextButton(onClick = { showDuplicateDialog = false }) { Text(stringResource(R.string.action_close)) } }
         )
     }
     // ── Nearby Screen ─────────────────────────────────────────
@@ -1772,6 +1801,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 }
             },
             confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                 Button(onClick = {
                     showSelectionDialog = false
                     val toDownload = missingSongsList.filter { it.isSelected }.map { it.remoteSong }
@@ -1799,7 +1830,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = {}
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+}
         )
     }
 
@@ -1846,7 +1879,9 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { songToAddToPlaylist = null }) { Text(stringResource(R.string.action_cancel)) } }
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+ TextButton(onClick = { songToAddToPlaylist = null }) { Text(stringResource(R.string.action_cancel)) } }
         )
     }
 
@@ -1865,6 +1900,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 )
             },
             confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                 Button(onClick = {
                     if (newPlaylistName.isNotBlank()) {
                         scope.launch(Dispatchers.IO) {
@@ -1905,13 +1942,17 @@ private val roomStateHttpClient by lazy {
 private val roomStateGson = Gson()
 
 /** 房主没开“一起听”或者请求失败，都直接返回 null——调用方按“暂时同步不上”处理，不崩、不弹一堆错误。 */
-private fun fetchRoomState(device: DiscoveredDevice): RoomManager.RoomState? {
+private fun fetchRoomState(context: Context, device: DiscoveredDevice): RoomManager.RoomState? {
     return try {
+        // 用"当前最新"的地址：加入房间时记下的 host 可能已经过期，或者当时选的就是个连不上的地址
+        val live = NsdHelper.currentDevice(device.deviceId) ?: device
         val request = Request.Builder()
-            .url("http://${device.host}:${device.port}/auralis/room/state")
+            .url(NsdHelper.peerUrl(live.host, live.port, "auralis", "room", "state"))
             .get()
             .build()
-        roomStateHttpClient.newCall(request).execute().use { resp ->
+        // 绑定到 Wi-Fi：开着移动数据而 Wi-Fi/热点没有外网时，Android 会把默认网络切到移动数据，
+        // 普通请求发往 192.168.x.x 就走了移动数据、连不上——这就是"开 data 后一起听失效"
+        LanNet.clientFor(context, roomStateHttpClient, live.host).newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) return null
             val body = resp.body?.string() ?: return null
             roomStateGson.fromJson(body, RoomManager.RoomState::class.java)

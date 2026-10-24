@@ -33,6 +33,11 @@ class SyncService : Service() {
     private val channelId = "sync_channel"
     private val notificationId = 1001
     private var lastLog = ""
+    private var syncLockHeld = false
+
+    private fun releaseSyncLock() {
+        if (syncLockHeld) { syncLockHeld = false; TransferLocks.release() }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -61,6 +66,10 @@ class SyncService : Service() {
             startForeground(notificationId, notification)
         }
 
+        // 同步期间保持 CPU/Wi-Fi 不休眠，否则息屏后速度会掉得很厉害甚至卡住
+        TransferLocks.acquire(this)
+        syncLockHeld = true
+
         // 开始调用你那个强大的 SyncManager 进行下载
         serviceScope.launch {
             SyncManager.downloadSelected(
@@ -77,6 +86,7 @@ class SyncService : Service() {
                     updateNotification(lastLog, 100, percent, false) // 实时更新进度条
                 },
                 onComplete = { successCount, failCount ->
+                    releaseSyncLock()
                     serviceScope.launch {
                         // 【关键修复】：以前不管实际下没下到东西，通知栏一律显示"同步完成"。
                         // 现在按真实结果分三种文案：全成功才用庆祝文案，部分失败如实报数字，
@@ -167,6 +177,7 @@ class SyncService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        releaseSyncLock()
         serviceScope.cancel() // 如果服务被摧毁，立刻停止下载
     }
 }

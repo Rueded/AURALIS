@@ -528,6 +528,8 @@ fun SettingsScreen(
                         title = { Text(stringResource(R.string.confirm_restore_title)) },
                         text = { Text(stringResource(R.string.confirm_restore_body)) },
                         confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                             TextButton(onClick = {
                                 showRestoreConfirm = false
                                 isWorking = true

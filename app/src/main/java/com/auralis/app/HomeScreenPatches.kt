@@ -549,6 +549,8 @@ fun SongItemUI(
             title = { Text(stringResource(R.string.action_confirm_delete)) },
             text = { Text(stringResource(R.string.confirm_delete_file_body)) },
             confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                 Button(
                     onClick = { showDeleteConfirm = false; onDelete() },
                     colors = ButtonDefaults.buttonColors(

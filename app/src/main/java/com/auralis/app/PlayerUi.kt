@@ -357,6 +357,8 @@ fun SpeedControlChip(
                     }
                 },
                 confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                     TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.action_done)) }
                 },
                 dismissButton = {

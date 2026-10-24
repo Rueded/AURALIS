@@ -5,15 +5,10 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- 设备 ID 不能被还原到另一台手机，否则两台设备 ID 相同，互相看不见 -->
+        <exclude domain="sharedpref" path="auralis_device.xml"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="auralis_device.xml"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

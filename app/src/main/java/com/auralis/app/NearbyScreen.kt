@@ -34,8 +34,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -73,6 +77,31 @@ fun NearbyScreen(
 
     // 绑定确认
     var deviceToBindDialog by remember { mutableStateOf<DiscoveredDevice?>(null) }
+    var showManualDialog   by remember { mutableStateOf(false) }
+
+    // ── Nearby Connections（不依赖路由器的备用传输）──
+    var showNcSheet     by remember { mutableStateOf(false) }
+    var ncPickingSongs  by remember { mutableStateOf(false) }
+    var ncPendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val ncPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val action = ncPendingAction
+        ncPendingAction = null
+        if (result.values.all { it }) action?.invoke()
+        else android.widget.Toast.makeText(context, context.getString(R.string.nc_err_permission), android.widget.Toast.LENGTH_LONG).show()
+    }
+    /** 先检查 Google Play 服务 / 蓝牙 / 定位开关，再申请运行时权限，全部就绪后才执行 [action]。 */
+    fun ncRun(action: () -> Unit) {
+        val problem = nearbyConnectionsPrecheck(context)
+        if (problem != null) {
+            android.widget.Toast.makeText(context, problem, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val missing = NearbyConnectionsPermissions.missing(context)
+        if (missing.isEmpty()) action()
+        else { ncPendingAction = action; ncPermLauncher.launch(missing.toTypedArray()) }
+    }
 
     // ── 初始化 ──────────────────────────────────────────────────
     LaunchedEffect(Unit) {
@@ -83,7 +112,9 @@ fun NearbyScreen(
         // ✅ 不重复启动，discovery 已在 MusicAppScreen 启动
 // 只刷新一次让 UI 显示 isScanning 状态
         isScanning = true
-        delay(3_000)
+        // mDNS 被网络拦截时（校园网/访客网络/部分路由器）扫不到设备，这里同时扫一遍本网段兜底
+        scope.launch(Dispatchers.IO) { NsdHelper.scanSubnet(context) }
+        delay(4_000)
         isScanning = false
     }
 
@@ -107,6 +138,9 @@ fun NearbyScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showManualDialog = true }) {
+                        Icon(Icons.Filled.Link, stringResource(R.string.nearby_manual_title))
+                    }
                     if (isScanning) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -132,9 +166,13 @@ fun NearbyScreen(
                         IconButton(onClick = {
                             scope.launch {
                                 isScanning = true
+                                // 重新开始扫描即可。以前扫完 12 秒后调用 stopDiscovery()：
+                                // 它会停掉整个 app 的持续扫描并且清空已发现的设备列表，
+                                // 点一次"重新扫描"之后设备反而全消失了，要重启 app 才恢复。
                                 NsdHelper.startDiscovery(context)
-                                delay(12_000)
-                                NsdHelper.stopDiscovery()
+                                val subnet = launch(Dispatchers.IO) { NsdHelper.scanSubnet(context) }
+                                delay(5_000)
+                                subnet.join()
                                 isScanning = false
                             }
                         }) {
@@ -150,6 +188,25 @@ fun NearbyScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+
+            // ── 不依赖路由器的传输（Google 附近分享）─────────────
+            item {
+                NearbyConnectionsEntryCard(
+                    onSend = {
+                        scope.launch(Dispatchers.IO) {
+                            allSongs = AppDatabase.getDatabase(context).songDao().getAllSongs().first()
+                            selectedSongs = emptySet()
+                            ncPickingSongs = true
+                        }
+                    },
+                    onReceive = {
+                        ncRun {
+                            NearbyConnectionsTransport.startReceiving(context)
+                            showNcSheet = true
+                        }
+                    }
+                )
+            }
 
             // ── 一起听：房主开关 ─────────────────────────────
             item {
@@ -200,7 +257,7 @@ fun NearbyScreen(
                 }
                 items(boundDevices, key = { it.deviceId }) { bound ->
                     val liveDevice = discoveredDevices.firstOrNull { it.deviceId == bound.deviceId }
-                    val isOnline   = liveDevice != null
+                    val isOnline   = liveDevice?.reachable == true
                     val isListeningTogether = joinedRoomHost?.deviceId == bound.deviceId
                     BoundDeviceCard(
                         bound      = bound,
@@ -256,6 +313,17 @@ fun NearbyScreen(
                 )
             }
 
+            if (newDevices.isEmpty() && !isScanning) {
+                item {
+                    Text(
+                        stringResource(R.string.nearby_no_devices_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+            }
+
             items(newDevices, key = { it.deviceId }) { device ->
                 NewDeviceCard(
                     device  = device,
@@ -287,6 +355,8 @@ fun NearbyScreen(
                 Text(stringResource(R.string.bind_device_body, device.deviceName))
             },
             confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                 Button(onClick = {
                     val bound = BoundDevice(
                         deviceId    = device.deviceId,
@@ -304,6 +374,36 @@ fun NearbyScreen(
             }
         )
     }
+
+    if (showManualDialog) ManualConnectDialog(onDismiss = { showManualDialog = false })
+
+    // Nearby Connections：发送方先选歌，选好后开始搜索附近设备
+    if (ncPickingSongs) {
+        SongPickerSheet(
+            songs      = allSongs,
+            selected   = selectedSongs,
+            onToggle   = { path ->
+                selectedSongs = if (selectedSongs.contains(path)) selectedSongs - path else selectedSongs + path
+            },
+            isSending  = false,
+            sendResult = null,
+            onSend     = {
+                val toSend = allSongs.filter { selectedSongs.contains(it.data) }
+                if (toSend.isEmpty()) return@SongPickerSheet
+                ncPickingSongs = false
+                selectedSongs  = emptySet()
+                ncRun {
+                    NearbyConnectionsTransport.startSending(context, toSend)
+                    showNcSheet = true
+                }
+            },
+            onDismiss  = {
+                ncPickingSongs = false
+                selectedSongs  = emptySet()
+            }
+        )
+    }
+    if (showNcSheet) NearbyConnectionsSheet(onDismiss = { showNcSheet = false })
 
     // ── 选歌弹窗 ────────────────────────────────────────────────
     if (showSongPicker && selectedDevice != null) {
@@ -325,7 +425,7 @@ fun NearbyScreen(
                 scope.launch {
                     val ok = sendSongs(context, device, toSend, gson)
                     isSending = false
-                    sendResult = if (ok) context.getString(R.string.transfer_complete) else context.getString(R.string.transfer_failed_maybe_not_receiving)
+                    sendResult = if (ok) context.getString(R.string.nearby_sent_waiting_confirm) else context.getString(R.string.transfer_failed_maybe_not_receiving)
                     if (ok) {
                         delay(1500)
                         showSongPicker = false
@@ -480,6 +580,82 @@ private fun BoundDeviceCard(
     }
 }
 
+// ── 手动连接对话框 ────────────────────────────────────────────────
+// 自动发现（mDNS）被网络拦截时的兜底：直接输入对方 IP。
+
+@Composable
+private fun ManualConnectDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var host by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val myIps = remember { LanNet.localIpv4().map { it.ip } }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        shape = RoundedCornerShape(20.dp),
+        icon = { Icon(Icons.Filled.Link, null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text(stringResource(R.string.nearby_manual_title)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.nearby_manual_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (myIps.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.nearby_manual_my_ip, myIps.joinToString(", ")),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = { host = it; error = null },
+                    label = { Text(stringResource(R.string.nearby_manual_ip_label)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri
+                    ),
+                    isError = error != null,
+                    supportingText = { error?.let { Text(it) } }
+                )
+            }
+        },
+        confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
+            Button(
+                enabled = host.isNotBlank() && !busy,
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        // 支持 "192.168.1.5" 或 "192.168.1.5:5001"
+                        val parts = host.trim().split(':')
+                        val h = parts[0]
+                        val p = parts.getOrNull(1)?.toIntOrNull() ?: AuralisServer.PORT
+                        val dev = NsdHelper.connectManually(context, h, p)
+                        busy = false
+                        if (dev != null) onDismiss()
+                        else error = context.getString(R.string.nearby_manual_failed, host.trim())
+                    }
+                }
+            ) {
+                if (busy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Text(stringResource(R.string.nearby_manual_connect))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(android.R.string.cancel)) }
+        }
+    )
+}
+
 // ── 新发现设备卡片 ────────────────────────────────────────────────
 
 @Composable
@@ -514,11 +690,27 @@ private fun NewDeviceCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (!device.reachable) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        stringResource(
+                            when {
+                                device.lastError == "refused"     -> R.string.nearby_err_refused
+                                device.lastError == "read_timeout" -> R.string.nearby_err_frozen
+                                device.lastError == "unreachable" -> R.string.nearby_err_noroute
+                                else                              -> R.string.nearby_unreachable_hint
+                            }
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
             TextButton(onClick = onBind) { Text(stringResource(R.string.action_bind)) }
             Spacer(Modifier.width(4.dp))
             FilledTonalButton(
                 onClick = onSend,
+                enabled = device.reachable,
                 shape   = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Filled.Send, null, modifier = Modifier.size(16.dp))
@@ -811,6 +1003,9 @@ fun IncomingPushDialog(
         } else null
     }
 
+    val items = remember(request) { request.allItems() }
+    val totalSize = remember(items) { items.sumOf { it.size.coerceAtLeast(0L) } }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
@@ -872,7 +1067,9 @@ fun IncomingPushDialog(
                 Spacer(Modifier.height(12.dp))
 
                 Text(
-                    stringResource(R.string.wants_to_share_song),
+                    if (items.size > 1)
+                        stringResource(R.string.nearby_wants_share_count, items.size, formatTransferBytes(totalSize))
+                    else stringResource(R.string.wants_to_share_song),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -891,8 +1088,16 @@ fun IncomingPushDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
+                if (items.size > 1) {
+                    Text(
+                        stringResource(R.string.nearby_and_more, items.size - 1),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center
+                    )
+                }
 
-                if (request.hasLrc) {
+                if (items.any { it.hasLrc }) {
                     Spacer(Modifier.height(8.dp))
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -909,6 +1114,8 @@ fun IncomingPushDialog(
             }
         },
         confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
             Button(
                 onClick = onAccept,
                 modifier = Modifier.fillMaxWidth(),
@@ -936,15 +1143,66 @@ private val httpClient = OkHttpClient.Builder()
     .writeTimeout(30, TimeUnit.SECONDS)
     .build()
 
-/** 推送"当前正在播放"给对方（不传文件，只推通知） */
-suspend fun pushSong(
+/** 一次批量接收的进度。 */
+data class TransferProgress(
+    val doneFiles: Int = 0,
+    val totalFiles: Int = 0,
+    val failedFiles: Int = 0,
+    val bytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val speedBps: Long = 0L
+) {
+    /** 已知总字节数就按字节算（最平滑）；否则多首歌按完成数算；单首且大小未知时是"不确定"进度。 */
+    val determinate: Boolean get() = totalBytes > 0 || totalFiles > 1
+    val fraction: Float get() = when {
+        totalBytes > 0 -> (bytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+        totalFiles > 0 -> doneFiles.toFloat() / totalFiles
+        else -> 0f
+    }
+}
+
+data class BatchResult(val ok: Int, val failed: Int)
+
+fun formatTransferBytes(b: Long): String = when {
+    b >= 1L shl 30 -> String.format(java.util.Locale.US, "%.2f GB", b / 1073741824.0)
+    b >= 1L shl 20 -> String.format(java.util.Locale.US, "%.1f MB", b / 1048576.0)
+    b >= 1024      -> String.format(java.util.Locale.US, "%.0f KB", b / 1024.0)
+    else           -> "$b B"
+}
+
+/**
+ * 一次推送一批歌（只发一条通知，对方只需确认一次）。返回对方是否接受了这次推送。
+ * 以前是每首歌单独推送一条：对方要点 N 次"接收"，而且一首传完才开始下一首。
+ */
+suspend fun pushSongs(
     context: Context,
     device: DiscoveredDevice,
-    song: Song,
+    songs: List<Song>,
     gson: Gson
 ): Boolean = withContext(Dispatchers.IO) {
     try {
-        val coverBitmap = CoverArtCache.loadBitmapFromDisk(context, song.data)
+        val existing = songs.filter { java.io.File(it.data).exists() }
+        if (existing.isEmpty()) {
+            Log.w("NearbyScreen", "要发送的歌曲文件都不存在")
+            return@withContext false
+        }
+
+        // 先登记"允许对方下载这几首"，再通知对方
+        AuralisServer.offer(context, existing.map { it.data })
+
+        val items = existing.map { s ->
+            val f = java.io.File(s.data)
+            PushItem(
+                filename = f.name,
+                title    = s.title,
+                artist   = s.artist,
+                size     = f.length(),
+                hasLrc   = java.io.File(f.parent, "${f.nameWithoutExtension}.lrc").exists()
+            )
+        }
+
+        val first = existing.first()
+        val coverBitmap = CoverArtCache.loadBitmapFromDisk(context, first.data)
         val coverB64 = if (coverBitmap != null) {
             val small = Bitmap.createScaledBitmap(coverBitmap, 120, 120, true)
             val bos   = ByteArrayOutputStream()
@@ -952,121 +1210,247 @@ suspend fun pushSong(
             Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
         } else ""
 
-        val lrcExists = java.io.File(
-            java.io.File(song.data).parent,
-            "${java.io.File(song.data).nameWithoutExtension}.lrc"
-        ).exists()
-
         val body = gson.toJson(
-            mapOf(
-                "senderName"     to AuralisDeviceId.getName(context),
-                "senderDeviceId" to AuralisDeviceId.getId(context),
-                "songTitle"      to song.title,
-                "artist"         to song.artist,
-                "filename"       to java.io.File(song.data).name,
-                "hasLrc"         to lrcExists,
-                "coverBase64"    to coverB64
+            PushRequest(
+                senderName     = AuralisDeviceId.getName(context),
+                senderDeviceId = AuralisDeviceId.getId(context),
+                senderIp       = "",                       // 接收方用 TCP 连接的来源地址填写
+                songTitle      = first.title,
+                artist         = first.artist,
+                filename       = items[0].filename,
+                hasLrc         = items[0].hasLrc,
+                coverBase64    = coverB64,
+                items          = items
             )
         )
 
         val req = Request.Builder()
-            .url("http://${device.host}:${device.port}/auralis/push")
+            .url(NsdHelper.peerUrl(device.host, device.port, "auralis", "push"))
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val resp = httpClient.newCall(req).execute()
-        resp.isSuccessful
+        // 要读响应体确认 ok=true（对方关了接收开关时是 200 + ok:false），并关闭响应避免连接泄漏
+        LanNet.clientFor(context, httpClient, device.host).newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            val accepted = resp.isSuccessful && text.contains("\"ok\":true")
+            if (!accepted) Log.w("NearbyScreen", "对方没有接受推送: HTTP ${resp.code} $text")
+            accepted
+        }
     } catch (e: Exception) {
-        Log.e("NearbyScreen", "推送失败: ${e.message}")
+        Log.e("NearbyScreen", "推送失败: ${e.javaClass.simpleName}: ${e.message}")
         false
     }
 }
 
-/** 把选中的歌曲文件传到对方（流式 HTTP 下载方向反过来：我是服务端，对方来拉） */
+/** 单曲推送（"推送当前播放"用），内部就是一批只有一首。 */
+suspend fun pushSong(context: Context, device: DiscoveredDevice, song: Song, gson: Gson): Boolean =
+    pushSongs(context, device, listOf(song), gson)
+
+/** 把选中的歌曲一次性通知给对方；对方确认后会自己来我这里拉取。 */
 suspend fun sendSongs(
     context: Context,
     device: DiscoveredDevice,
     songs: List<Song>,
     gson: Gson
-): Boolean = withContext(Dispatchers.IO) {
-    // 原理：我方已经开着 AuralisServer，通知对方来我这里拉取
-    // 先推一条 push 通知，让对方弹出下载确认
-    try {
-        songs.forEach { song ->
-            pushSong(context, device, song, gson)
-            delay(200)
-        }
-        true
-    } catch (e: Exception) {
-        Log.e("NearbyScreen", "sendSongs 失败: ${e.message}")
-        false
-    }
-}
+): Boolean = pushSongs(context, device, songs, gson)
 
-/** 从对方 AuralisServer 下载歌曲到本地 */
-suspend fun downloadFromPeer(
+/** 同时下载几首。局域网里单个连接常常跑不满带宽（尤其是很多小文件时握手/写入占比高），3 路并发是个稳妥的折中。 */
+private const val DOWNLOAD_CONCURRENCY = 3
+
+/**
+ * 批量接收：最多 [DOWNLOAD_CONCURRENCY] 首并发下载，整体按"字节"汇报进度。
+ * 单首失败会自动重试一次，且不会影响其他歌曲。
+ */
+suspend fun downloadBatch(
     context: Context,
     push: PushRequest,
     saveFolder: String,
-    onProgress: (Float) -> Unit = {}   // ✅ 新增进度回调
-): Boolean = withContext(Dispatchers.IO) {
+    onProgress: (TransferProgress) -> Unit
+): BatchResult = withContext(Dispatchers.IO) {
+    val items = push.allItems()
+    val client = LanNet.clientFor(context, httpClient, push.senderIp)
+    TransferLocks.acquire(context, 30 * 60 * 1000L)   // 传输期间保持 CPU/Wi-Fi 不休眠
+    val readNs  = java.util.concurrent.atomic.AtomicLong(0L)
+    val writeNs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    // 总大小优先用对方推送里带的 size（不依赖 HTTP 响应头，进度条永远可靠）；
+    // 旧版发送方没有 size 时，拿到响应头的 Content-Length 再补上。
+    val totalBytes = java.util.concurrent.atomic.AtomicLong(items.sumOf { it.size.coerceAtLeast(0L) })
+    val bytes      = java.util.concurrent.atomic.AtomicLong(0L)
+    val done       = java.util.concurrent.atomic.AtomicInteger(0)
+    val failed     = java.util.concurrent.atomic.AtomicInteger(0)
+    val startNs    = System.nanoTime()
+    val lastEmitNs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    // 进度回调最多每 100ms 一次。以前每读 16KB 就写一次 Compose 状态，
+    // 大文件时每秒几千次状态写入，没必要，还会让界面刷新节奏很不均匀。
+    fun emit(force: Boolean = false) {
+        val now = System.nanoTime()
+        if (!force && now - lastEmitNs.get() < 100_000_000L) return
+        lastEmitNs.set(now)
+        val elapsed = (now - startNs) / 1_000_000_000.0
+        val speed = if (elapsed > 0.5) (bytes.get() / elapsed).toLong() else 0L
+        onProgress(TransferProgress(done.get(), items.size, failed.get(), bytes.get(), totalBytes.get(), speed))
+    }
+
+    emit(force = true)
+    val sem = kotlinx.coroutines.sync.Semaphore(DOWNLOAD_CONCURRENCY)
+
     try {
-        val baseUrl  = "http://${push.senderIp}:${AuralisServer.PORT}"
-        val filename = push.filename
-        val destDir  = java.io.File(saveFolder).apply { mkdirs() }
-        val destFile = java.io.File(destDir, filename)
+        coroutineScope {
+            items.map { item ->
+                async {
+                    sem.acquire()
+                    try {
+                        val counted = java.util.concurrent.atomic.AtomicBoolean(item.size > 0)
+                        var ok = false
+                        for (attempt in 1..2) {
+                            if (!isActive) break
+                            ok = downloadOne(
+                                context, client, push.senderIp, item, saveFolder, counted,
+                                onBytes = { delta -> bytes.addAndGet(delta); emit() },
+                                onTotal = { add -> totalBytes.addAndGet(add) },
+                                readNs = readNs, writeNs = writeNs
+                            )
+                            if (ok) break
+                            Log.w("NearbyScreen", "第 $attempt 次下载失败: ${item.filename}")
+                            delay(500)
+                        }
+                        if (ok) done.incrementAndGet() else failed.incrementAndGet()
+                        emit(force = true)
+                    } finally {
+                        sem.release()
+                    }
+                }
+            }.awaitAll()
+        }
+    } finally {
+        TransferLocks.release()   // 无论成功、失败还是被取消都要释放
+    }
 
-        val req  = Request.Builder().url("$baseUrl/auralis/download/$filename").build()
-        val resp = httpClient.newCall(req).execute()
-        if (!resp.isSuccessful) return@withContext false
+    emit(force = true)
+    val wall = (System.nanoTime() - startNs) / 1e9
+    val mb = bytes.get() / 1048576.0
+    val rn = readNs.get().toDouble(); val wn = writeNs.get().toDouble()
+    Log.i("NearbyPerf", "共 ${"%.1f".format(mb)}MB 用时 ${"%.1f".format(wall)}s 平均 ${"%.1f".format(if (wall > 0) mb / wall else 0.0)}MB/s " +
+        "等待数据 ${"%.0f".format(rn / (rn + wn + 1) * 100)}% 写存储 ${"%.0f".format(wn / (rn + wn + 1) * 100)}% 并发 $DOWNLOAD_CONCURRENCY")
+    BatchResult(done.get(), failed.get())
+}
 
-        val body = resp.body ?: return@withContext false
-        val totalBytes = body.contentLength()  // -1 if unknown
+/** 下载一首（含歌词）。失败返回 false，并把已经计入进度的字节数扣回去，方便重试。 */
+private fun downloadOne(
+    context: Context,
+    client: OkHttpClient,
+    host: String,
+    item: PushItem,
+    saveFolder: String,
+    totalCounted: java.util.concurrent.atomic.AtomicBoolean,
+    onBytes: (Long) -> Unit,
+    onTotal: (Long) -> Unit,
+    readNs: java.util.concurrent.atomic.AtomicLong,
+    writeNs: java.util.concurrent.atomic.AtomicLong
+): Boolean {
+    val tag = "NearbyScreen"
+    val resolver = context.contentResolver
+    var pendingUri: android.net.Uri? = null
+    var gotBytes = 0L
+    return try {
+        // 只取文件名部分，防止对方发来带 ../ 的恶意路径
+        val filename = java.io.File(item.filename).name
+        if (host.isBlank() || filename.isBlank()) {
+            Log.e(tag, "下载参数无效: host='$host' filename='$filename'")
+            return false
+        }
+        // 用 HttpUrl 拼地址：文件名里的空格/#/?/%/中文都会被正确编码
+        fun urlFor(name: String) = NsdHelper.peerUrl(host, AuralisServer.PORT, "auralis", "download", name)
 
-        var downloadedBytes = 0L
-        val buffer = ByteArray(8192)
+        // ── 音频：通过 MediaStore 写入（不需要存储写权限，插入后系统媒体库自动可见）──
+        val audioCollection = android.provider.MediaStore.Audio.Media
+            .getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val relPath = android.os.Environment.DIRECTORY_MUSIC + "/"
 
-        body.byteStream().use { input ->
-            destFile.outputStream().use { output ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read == -1) break
-                    output.write(buffer, 0, read)
-                    downloadedBytes += read
-                    if (totalBytes > 0) {
-                        onProgress(downloadedBytes.toFloat() / totalBytes)
+        var alreadyHave = false
+        resolver.query(
+            audioCollection,
+            arrayOf(android.provider.MediaStore.Audio.Media._ID),
+            "${android.provider.MediaStore.Audio.Media.DISPLAY_NAME}=? AND ${android.provider.MediaStore.Audio.Media.RELATIVE_PATH}=?",
+            arrayOf(filename, relPath), null
+        )?.use { c -> alreadyHave = c.moveToFirst() }
+
+        if (alreadyHave) {
+            Log.i(tag, "Music/ 里已有 $filename，跳过音频下载")
+            if (item.size > 0) { onBytes(item.size); gotBytes += item.size }
+        } else {
+            val ext  = java.io.File(filename).extension.lowercase()
+            val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                ?.takeIf { it.startsWith("audio/") } ?: "audio/mpeg"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.Audio.Media.MIME_TYPE, mime)
+                put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, relPath)
+                put(android.provider.MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(audioCollection, values)
+                ?: throw java.io.IOException("MediaStore 拒绝创建 $filename")
+            pendingUri = uri
+
+            client.newCall(Request.Builder().url(urlFor(filename)).build()).execute().use { resp ->
+                if (!resp.isSuccessful) throw java.io.IOException("对方返回 HTTP ${resp.code}")
+                val body = resp.body ?: throw java.io.IOException("对方返回空内容")
+                val len = body.contentLength()
+                if (len > 0 && totalCounted.compareAndSet(false, true)) onTotal(len)
+
+                val buffer = ByteArray(64 * 1024)
+                val rawOut = resolver.openOutputStream(uri) ?: throw java.io.IOException("无法写入 $uri")
+                // OkHttp 的 read() 每次最多只给 8KB，直接写到 MediaStore/FUSE 就是每 8KB 一次系统调用；
+                // 包一层 256KB 的缓冲，把小块攒成大块再写，写存储这一段会快很多。
+                val output = java.io.BufferedOutputStream(rawOut, 256 * 1024)
+                body.byteStream().use { input ->
+                    output.use { out ->
+                        while (true) {
+                            val r0 = System.nanoTime()
+                            val read = input.read(buffer)
+                            val r1 = System.nanoTime()
+                            if (read == -1) break
+                            out.write(buffer, 0, read)
+                            readNs.addAndGet(r1 - r0)
+                            writeNs.addAndGet(System.nanoTime() - r1)
+                            gotBytes += read
+                            onBytes(read.toLong())
+                        }
+                        val f0 = System.nanoTime()
+                        out.flush()
+                        writeNs.addAndGet(System.nanoTime() - f0)
                     }
                 }
             }
+            resolver.update(uri, android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.IS_PENDING, 0)
+            }, null, null)
+            pendingUri = null
         }
 
-        // MediaStore 通知
-        android.media.MediaScannerConnection.scanFile(
-            context,
-            arrayOf(destFile.absolutePath),
-            null
-        ) { _, _ -> }
-
-        // LRC
-        if (push.hasLrc) {
+        // ── 歌词（尽力而为，失败不影响歌曲本身算成功）──
+        if (item.hasLrc) {
             val lrcName = "${java.io.File(filename).nameWithoutExtension}.lrc"
-            val lrcDest = java.io.File(destDir, lrcName)
             try {
-                val lrcResp = httpClient.newCall(
-                    Request.Builder().url("$baseUrl/auralis/download/$lrcName").build()
-                ).execute()
-                if (lrcResp.isSuccessful) {
-                    lrcResp.body?.byteStream()?.use { i ->
-                        lrcDest.outputStream().use { o -> i.copyTo(o) }
-                    }
+                client.newCall(Request.Builder().url(urlFor(lrcName)).build()).execute().use { lrcResp ->
+                    if (lrcResp.isSuccessful) {
+                        val destDir = java.io.File(saveFolder).apply { mkdirs() }
+                        lrcResp.body?.byteStream()?.use { i ->
+                            java.io.File(destDir, lrcName).outputStream().use { o -> i.copyTo(o) }
+                        }
+                    } else Log.w(tag, "歌词下载 HTTP ${lrcResp.code}")
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(tag, "歌词保存失败（通常是没有文件写权限）: ${e.javaClass.simpleName}: ${e.message}")
+            }
         }
-
-        onProgress(1f)
         true
     } catch (e: Exception) {
-        Log.e("NearbyScreen", "下载失败: ${e.message}")
+        Log.e(tag, "下载失败 ${item.filename}: ${e.javaClass.simpleName}: ${e.message}")
+        pendingUri?.let { try { resolver.delete(it, null, null) } catch (_: Exception) {} }
+        if (gotBytes > 0) onBytes(-gotBytes)   // 把这次尝试已经计入的进度扣掉，重试才不会超过 100%
         false
     }
 }
@@ -1087,9 +1471,10 @@ fun NearbyShareQuickSheet(
 
     // 合并在线设备（绑定的在前）
     val onlineDevices = remember(discoveredDevices, boundDevices) {
+        val reachableDevices = discoveredDevices.filter { it.reachable }
         val bound = boundDevices
-            .mapNotNull { b -> discoveredDevices.firstOrNull { it.deviceId == b.deviceId } }
-        val others = discoveredDevices.filter { d -> bound.none { it.deviceId == d.deviceId } }
+            .mapNotNull { b -> reachableDevices.firstOrNull { it.deviceId == b.deviceId } }
+        val others = reachableDevices.filter { d -> bound.none { it.deviceId == d.deviceId } }
         bound + others
     }
 

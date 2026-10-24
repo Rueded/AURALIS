@@ -1618,10 +1618,12 @@ fun FullScreenPlayer(
                         val res = spectrogramResult!!
                         Column {
                             // Verdict Badge
-                            val badgeColor = when {
-                                res.isLossless -> Color(0xFF2E7D32) // Green
-                                res.cutoffHz >= 18000f -> Color(0xFFEF6C00) // Orange
-                                else -> Color(0xFFC62828) // Red
+                            // 颜色由判断结果的"严重程度"决定，不再拿截止频率去比：
+                            // 以前 cutoffHz >= 18000 就显示橙色，而 MP3 本身是有损格式，和截止频率没有关系
+                            val badgeColor = when (res.level) {
+                                0 -> Color(0xFF2E7D32) // 绿：没发现问题
+                                1 -> Color(0xFFEF6C00) // 橙：有损格式 / 来源存疑
+                                else -> Color(0xFFC62828) // 红：很可能是有损转码
                             }
 
                             val badgeBgColor = badgeColor.copy(alpha = 0.15f)
@@ -1635,7 +1637,7 @@ fun FullScreenPlayer(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = if (res.isLossless) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    imageVector = if (res.level == 0) Icons.Default.CheckCircle else Icons.Default.Warning,
                                     contentDescription = null,
                                     tint = badgeColor,
                                     modifier = Modifier.size(24.dp)
@@ -1730,7 +1732,7 @@ fun FullScreenPlayer(
             val liveDevices by NsdHelper.discovered.collectAsState()
             val boundDevices = remember { BoundDeviceStore.getAll(context) }
             val candidates = remember(liveDevices, boundDevices) {
-                liveDevices.filter { live -> boundDevices.any { it.deviceId == live.deviceId } }
+                liveDevices.filter { live -> live.reachable && boundDevices.any { it.deviceId == live.deviceId } }
             }
             AlertDialog(
                 onDismissRequest = { showListenTogetherPicker = false },
@@ -1760,6 +1762,8 @@ fun FullScreenPlayer(
                     }
                 },
                 confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                     TextButton(onClick = { showListenTogetherPicker = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
@@ -1786,6 +1790,8 @@ fun FullScreenPlayer(
                     }
                 },
                 confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                     Button(onClick = {
                         if (dontAskAgain) {
                             prefs.edit().putBoolean(prefKeySkipDelete, true).apply()
@@ -2062,6 +2068,8 @@ fun FullScreenPlayer(
                     }
                 },
                 confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                     TextButton(onClick = { showLyricsSelectorDialog = false }) { Text(stringResource(R.string.action_close)) }
                 }
             )
@@ -2209,7 +2217,9 @@ fun FullScreenPlayer(
                         }
                     }
                 },
-                confirmButton = {},
+                confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+},
                 dismissButton = {
                     TextButton(onClick = { showCoverSelectorDialog = false }) { Text(stringResource(R.string.action_close)) }
                 }

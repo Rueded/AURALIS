@@ -169,7 +169,9 @@ fun EqDialog(onDismiss: () -> Unit) {
         AlertDialog(
             onDismissRequest = onDismiss, title = { Text(stringResource(R.string.equalizer_bypassed_title)) },
             text = { Text(stringResource(R.string.equalizer_bypassed_body)) },
-            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_understood)) } }
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+ TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_understood)) } }
         )
         return
     }
@@ -193,7 +195,9 @@ fun EqDialog(onDismiss: () -> Unit) {
         AlertDialog(
             onDismissRequest = onDismiss, title = { Text(stringResource(R.string.equalizer_unavailable_title)) },
             text = { Text(eqErrorMessage ?: stringResource(R.string.unknown_error)) },
-            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } }
+            confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+ TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) } }
         )
         return
     }
@@ -322,6 +326,8 @@ fun EqDialog(onDismiss: () -> Unit) {
                 )
             },
             confirmButton = {
+            ApplyDialogBlur() // 统一的"背后模糊"（Android 12+），和均衡器对话框一致
+
                 Button(onClick = {
                     if (saveNameText.isNotBlank()) {
                         scope.launch {

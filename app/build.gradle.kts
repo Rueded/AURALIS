@@ -13,8 +13,8 @@ android {
         applicationId = "com.auralis.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 14
-        versionName = "11.0"
+        versionCode = 15
+        versionName = "11.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -31,6 +31,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // play-services-nearby 19.3.0 要求开启（19.5.0 起才取消了这个要求，但 19.5.x 的 Kotlin 元数据版本太新，见下）
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "11"
@@ -65,6 +67,13 @@ dependencies {
     // Google Drive 云备份：仅用登录拿 OAuth token，实际 Drive API 走现成的 OkHttp 直接调 REST 接口，
     // 不引入体积更大的 google-api-client / google-api-services-drive。
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // Nearby Connections：不依赖路由器的手机对手机传输（蓝牙发现 + Wi-Fi 直连/热点自动升级）。
+    // 不能用 19.5.x：它的 .kotlin_module 是用 Kotlin 2.4 编译的（元数据版本 2.4.0），
+    // 而本项目是 Kotlin 2.0.21（只认到 2.1.0），KSP 阶段会报 "Module was compiled with an incompatible version of Kotlin"。
+    // 19.3.0 是 2024 年 5 月发布的、早于这批新版本的最后一个版本，元数据版本较旧；
+    // 这个版本需要开启 core library desugaring（见上面 compileOptions 和下面的 coreLibraryDesugaring 依赖）。
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
 
