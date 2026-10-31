@@ -773,6 +773,10 @@ fun FullScreenPlayer(
             } ?: BackgroundMode.BREATHING
         }
 
+        // 垫一层和背景同色的底：ReactiveBackground 只画在"去掉状态栏 / 导航栏"之后的区域里，
+        // 上下两条系统栏区域露出的是窗口的纯黑底，看起来像是上下多出来一块空白
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
+
         ReactiveBackground(
             dominantColor  = animatedDominantColor,
             palette        = albumPalette,
@@ -1263,7 +1267,7 @@ fun FullScreenPlayer(
                 // ── 竖屏布局 ──
                 Column(
                     modifier = Modifier.fillMaxSize()
-                        .padding(start = 48.dp, end = 24.dp, top = 24.dp, bottom = 24.dp),
+                        .padding(start = 48.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
@@ -1357,7 +1361,6 @@ fun FullScreenPlayer(
                         }
                     }
 
-                    Spacer(Modifier.height(8.dp))
                     Box(
                         modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
                         contentAlignment = Alignment.Center
@@ -1373,14 +1376,14 @@ fun FullScreenPlayer(
                             Image(
                                 painterResource(id = R.drawable.hires_logo),
                                 null,
-                                modifier = Modifier.align(Alignment.CenterEnd).height(55.dp)
+                                modifier = Modifier.align(Alignment.CenterEnd).height(44.dp)
                                     .padding(end = 20.dp),
                                 contentScale = ContentScale.Fit
                             )
                         }
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
                     Box(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.Center
@@ -1413,8 +1416,9 @@ fun FullScreenPlayer(
                         } else if (showLyrics && lrcLines.isEmpty()) {
                             NoLyricsEmptyState(onImport = { lrcPickerInPlayer.launch("*/*") })
                         } else {
-                            val imageModifier = Modifier.playerCoverFrame(
-                                size = 300.dp,
+                            // 封面边长 = min(可用宽度, 可用高度, 320dp)，永远是正方形，不会再被压成长方形裁掉上下
+                            val imageModifier = Modifier.playerCoverFrameSquare(
+                                maxSize = 320.dp,
                                 corner = 24.dp,
                                 glowColor = animatedDominantColor
                             )
@@ -1535,7 +1539,7 @@ fun FullScreenPlayer(
 
                     AnimatedVisibility(visible = !isFullscreenLyrics) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(12.dp))
                             PlayerTitleSection(
                                 title = title,
                                 artist = artist,
@@ -1544,9 +1548,9 @@ fun FullScreenPlayer(
                             )
 
                             // ── Audio quality badge removed ──
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(8.dp))
                             ControlsSection(isLandscapeLayout = false)
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(4.dp))
                         }
                     }
                 }

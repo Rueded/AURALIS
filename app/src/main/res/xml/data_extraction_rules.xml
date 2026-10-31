@@ -7,8 +7,10 @@
     <cloud-backup>
         <!-- 设备 ID 不能被还原到另一台手机，否则两台设备 ID 相同，互相看不见 -->
         <exclude domain="sharedpref" path="auralis_device.xml"/>
+        <exclude domain="sharedpref" path="auralis_secure.xml"/>
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="auralis_device.xml"/>
+        <exclude domain="sharedpref" path="auralis_secure.xml"/>
     </device-transfer>
 </data-extraction-rules>

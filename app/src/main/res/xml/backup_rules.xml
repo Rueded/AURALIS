@@ -8,4 +8,6 @@
 <full-backup-content>
     <!-- 设备 ID 不能被备份/还原到另一台手机，否则两台设备 ID 相同，互相把对方当成"自己"而不显示 -->
     <exclude domain="sharedpref" path="auralis_device.xml"/>
+    <!-- 备份口令（由 Android Keystore 密钥加密）：还原到另一台手机后那边没有这把密钥，解不开，也不该带过去 -->
+    <exclude domain="sharedpref" path="auralis_secure.xml"/>
 </full-backup-content>

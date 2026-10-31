@@ -24,6 +24,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,6 +111,24 @@ fun PremiumProgressSlider(
 fun Modifier.playerCoverFrame(size: Dp, corner: Dp = 24.dp, glowColor: Color = Color.Black): Modifier =
     this
         .size(size)
+        .shadow(20.dp, RoundedCornerShape(corner), spotColor = glowColor.copy(alpha = 0.35f))
+        .clip(RoundedCornerShape(corner))
+
+/**
+ * 竖屏用的封面容器：边长取"可用宽度 / 可用高度 / [maxSize]"里最小的一个，永远是正方形。
+ *
+ * 以前竖屏用的是 playerCoverFrame(size = 300.dp)，也就是固定 300dp。手机竖屏的高度被标题、进度条、
+ * 控制按钮这些固定高度的部分占掉后，留给封面的高度常常只有 230dp 左右：size() 会被父布局的最大高度
+ * 压扁，封面变成 300×230 的长方形，ContentScale.Crop 又把正方形的封面上下各裁掉一截。
+ * 平板高度充足所以没有这个问题。
+ */
+fun Modifier.playerCoverFrameSquare(maxSize: Dp, corner: Dp = 24.dp, glowColor: Color = Color.Black): Modifier =
+    this
+        .layout { measurable, constraints ->
+            val side = minOf(constraints.maxWidth, constraints.maxHeight, maxSize.roundToPx())
+            val placeable = measurable.measure(Constraints.fixed(side, side))
+            layout(side, side) { placeable.place(0, 0) }
+        }
         .shadow(20.dp, RoundedCornerShape(corner), spotColor = glowColor.copy(alpha = 0.35f))
         .clip(RoundedCornerShape(corner))
 

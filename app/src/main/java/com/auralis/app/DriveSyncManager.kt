@@ -78,6 +78,7 @@ object DriveSyncManager {
     private const val PREFS = "MusicSyncPrefs"
     private const val KEY_LAST_BACKUP_AT = "drive_last_backup_at"
     private const val KEY_NETEASE_COOKIE = "netease_custom_cookie" // 跟设置页里现有的 key 保持一致
+    const val KEY_COOKIE_NEEDS_PASSPHRASE = "backup_cookie_needs_passphrase"
     private const val KEY_SETTINGS_UPDATED_AT = "netease_cookie_updated_at" // 专门记"cookie 真正被改动的时间"，不是备份时间
     private const val KEY_LAN_COMPUTER_IP = "server_ip" // 对应 MusicAppScreen.kt 里 pcServerIp 用的那个 key
     private const val KEY_AUTO_BACKUP_ENABLED = "drive_auto_backup_enabled"
@@ -242,8 +243,10 @@ object DriveSyncManager {
         // 注意这里读的是"cookie 最后一次真正被改动"的时间戳，不是 System.currentTimeMillis()——
         // 这就是修复合并 bug 的关键，见上面 SettingsBackup 的注释
         val settingsUpdatedAt = prefs.getLong(KEY_SETTINGS_UPDATED_AT, 0L)
+        // 设置了"备份口令"就用口令加密（v2），没设置才退回邮箱派生的旧方式（v1）
+        val passphrase = BackupPassphraseStore.get(context)
         val settingsBackup = SettingsBackup(
-            neteaseCookieEnc = SettingsEncryptionHelper.encrypt(neteaseCookie, accountEmail),
+            neteaseCookieEnc = SettingsEncryptionHelper.encrypt(neteaseCookie, accountEmail, passphrase),
             lanComputerIpEnc = "", // 局域网 IP 不跨设备同步，永远留空
             settingsUpdatedAt = settingsUpdatedAt
         )
@@ -398,7 +401,14 @@ object DriveSyncManager {
         // 敏感设置：只解密应用 cookie。局域网 IP 不再从云端下发，
         // 保持每台设备自己本地那份设置不被覆盖。
         if (merged.settings != null) {
-            val decryptedCookie = SettingsEncryptionHelper.decrypt(merged.settings.neteaseCookieEnc, accountEmail)
+            val decryptedCookie = SettingsEncryptionHelper.decrypt(
+                merged.settings.neteaseCookieEnc, accountEmail, BackupPassphraseStore.get(context)
+            )
+            // 云端的 cookie 是用口令加密的、而这台设备没有口令（或口令不对）：记下来，设置页会提示用户
+            val needsPass = merged.settings.neteaseCookieEnc.isNotEmpty() &&
+                SettingsEncryptionHelper.needsPassphrase(merged.settings.neteaseCookieEnc) && decryptedCookie.isEmpty()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_COOKIE_NEEDS_PASSPHRASE, needsPass).apply()
             if (decryptedCookie.isNotEmpty()) {
                 val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 isRestoringSettings = true

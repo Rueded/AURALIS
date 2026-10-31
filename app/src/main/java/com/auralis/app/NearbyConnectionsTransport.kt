@@ -572,7 +572,12 @@ object NearbyConnectionsPermissions {
             list += android.Manifest.permission.BLUETOOTH_CONNECT
             list += android.Manifest.permission.BLUETOOTH_SCAN
         }
-        if (Build.VERSION.SDK_INT <= 31) list += android.Manifest.permission.ACCESS_FINE_LOCATION   // 文档：API 29–31
+        // 清单里定位权限现在是 maxSdkVersion=32（Android 12L 及以下），运行时申请也要覆盖到 API 32，
+        // 否则 12L 的手机会出现"清单声明了、却没申请"，Nearby 照样报缺权限。
+        if (Build.VERSION.SDK_INT in 29..32) list += android.Manifest.permission.ACCESS_FINE_LOCATION
+        // targetSdk ≥ 31 的应用在 Android 12 / 12L 上申请精确定位时，必须把粗略定位一起申请，
+        // 否则系统会直接忽略这次申请（用户在系统弹窗里可以选"大致位置"）
+        if (Build.VERSION.SDK_INT in 31..32) list += android.Manifest.permission.ACCESS_COARSE_LOCATION
         if (Build.VERSION.SDK_INT >= 33) list += android.Manifest.permission.NEARBY_WIFI_DEVICES
         return list.toTypedArray()
     }
@@ -586,9 +591,9 @@ object NearbyConnectionsPermissions {
         bm?.adapter?.isEnabled == true
     } catch (_: Exception) { true }   // 查询失败（缺权限等）就不拦着，让 Nearby 自己报错
 
-    /** Android 12 及以下，发现附近设备要求系统的"定位"开关是打开的。 */
+    /** Android 12L 及以下，发现附近设备要求系统的"定位"开关是打开的。 */
     fun locationServiceOk(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT > 31) return true
+        if (Build.VERSION.SDK_INT > 32) return true
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return true
         return androidx.core.location.LocationManagerCompat.isLocationEnabled(lm)
     }

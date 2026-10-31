@@ -483,6 +483,43 @@ fun SettingsScreen(
                             )
                         }
                         Spacer(Modifier.height(12.dp))
+                        // ── 备份口令：用它加密网易云 cookie 再上传，换设备要输入同一个口令 ──
+                        var passphraseSet by remember { mutableStateOf(BackupPassphraseStore.isSet(context)) }
+                        var needsPassphrase by remember {
+                            mutableStateOf(context.getSharedPreferences("MusicSyncPrefs", android.content.Context.MODE_PRIVATE)
+                                .getBoolean(DriveSyncManager.KEY_COOKIE_NEEDS_PASSPHRASE, false))
+                        }
+                        var showPassphraseDialog by remember { mutableStateOf(false) }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.backup_passphrase_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(
+                                        when {
+                                            needsPassphrase -> R.string.backup_passphrase_needed
+                                            passphraseSet   -> R.string.backup_passphrase_on
+                                            else            -> R.string.backup_passphrase_off
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (needsPassphrase) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { showPassphraseDialog = true }) {
+                                Text(stringResource(if (passphraseSet) R.string.backup_passphrase_change else R.string.backup_passphrase_set))
+                            }
+                        }
+                        if (showPassphraseDialog) {
+                            BackupPassphraseDialog(
+                                isSet = passphraseSet,
+                                onDismiss = { showPassphraseDialog = false },
+                                onChanged = { passphraseSet = BackupPassphraseStore.isSet(context) }
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             FilledTonalButton(
                                 onClick = {
