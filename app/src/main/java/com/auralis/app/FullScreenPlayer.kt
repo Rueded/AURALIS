@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -121,6 +122,15 @@ import androidx.compose.ui.graphics.drawscope.DrawScope // 确保绘图作用域
 // 如果 drawRect 还是红的，补上这个：
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import android.util.Log
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Headset
 import com.auralis.app.AudioQualityAnalysis
@@ -192,6 +202,7 @@ fun FullScreenPlayer(
 
         var spec by remember { mutableStateOf<AudioSpec?>(null) }
         var detailedInfo by remember { mutableStateOf("") }
+        var songDetailsInfo by remember { mutableStateOf<SongDetailsInfo?>(null) }
 
         var lrcLines by remember { mutableStateOf<List<LrcLine>>(emptyList()) }
         // 不管这份歌词是本地解析还是在线抓的，只要在全屏播放器这边更新了，
@@ -227,6 +238,7 @@ fun FullScreenPlayer(
         var showListenTogetherPicker by remember { mutableStateOf(false) }
 
         LaunchedEffect(audioPath) {
+            songDetailsInfo = null
             spectrogramResult = null
             isDetectingSpectrogram = false
             isFullTrackDetecting = false
@@ -266,7 +278,15 @@ fun FullScreenPlayer(
         LaunchedEffect(lyricsFontSize) {
             prefs.edit().putFloat("lyrics_font_size", lyricsFontSize).apply()
         }
-        var playbackSpeed by rememberSaveable { mutableFloatStateOf(1.0f) }
+        var playbackSpeed by rememberSaveable {
+            mutableFloatStateOf(mediaController?.playbackParameters?.speed ?: prefs.getFloat("playback_speed", 1.0f))
+        }
+        LaunchedEffect(mediaController?.playbackParameters) {
+            val currentSpeed = mediaController?.playbackParameters?.speed
+            if (currentSpeed != null && currentSpeed > 0f && currentSpeed != playbackSpeed) {
+                playbackSpeed = currentSpeed
+            }
+        }
         var abLoopStart by remember { mutableLongStateOf(-1L) }
         var abLoopEnd by remember { mutableLongStateOf(-1L) }
 
@@ -484,17 +504,41 @@ fun FullScreenPlayer(
                     // 安全提取文件后缀名 (比如 flac, wav, mp3)
                     val extName = if (isAudioVivid) "FLAC-AV3A" else file.extension.uppercase()
 
-                    // 4. 构造详情文本（标签走本地化资源，支持中英文）
+                    // 4. 构造结构化与文本化详情数据
                     val channelLabel = if (spec!!.isSpatial) context.getString(R.string.detail_channels_spatial) else context.getString(R.string.detail_channels_stereo)
+                    val parsedDetails = SongDetailsInfo(
+                        title = title,
+                        artist = artist,
+                        album = albumStr,
+                        genre = genreStr,
+                        year = yearStr,
+                        durationMs = durationMs,
+                        qualityLabel = spec?.level?.label ?: extName,
+                        extName = extName,
+                        sampleRateKhz = String.format(java.util.Locale.US, "%.1f kHz", dbSampleRate / 1000.0),
+                        bitDepth = dbBits,
+                        channels = ch,
+                        channelLabel = channelLabel,
+                        bitrateKbps = br / 1000,
+                        gain = if (dbGain != 0f) String.format(java.util.Locale.US, "%.2f dB", dbGain) else context.getString(R.string.gain_not_detected),
+                        sizeStr = sizeStr,
+                        playCount = playCount,
+                        lastPlayedStr = lastPlayedStr,
+                        lastModifiedStr = lastModifiedStr,
+                        path = audioPath
+                    )
+                    withContext(Dispatchers.Main) {
+                        songDetailsInfo = parsedDetails
+                    }
                     detailedInfo = """
-                🎵 ${context.getString(R.string.detail_section_basic)}
+                ${context.getString(R.string.detail_section_basic)}
                 ${context.getString(R.string.detail_title)}${context.getString(R.string.detail_separator)}$title
                 ${context.getString(R.string.detail_artist)}${context.getString(R.string.detail_separator)}$artist
                 ${context.getString(R.string.detail_album)}${context.getString(R.string.detail_separator)}$albumStr
                 ${context.getString(R.string.detail_genre)}${context.getString(R.string.detail_separator)}$genreStr
                 ${context.getString(R.string.detail_year)}${context.getString(R.string.detail_separator)}$yearStr
 
-                📊 ${context.getString(R.string.detail_section_audio_specs)}
+                ${context.getString(R.string.detail_section_audio_specs)}
                 ${context.getString(R.string.detail_quality)}${context.getString(R.string.detail_separator)}${spec!!.level.label} ($extName)
                 ${context.getString(R.string.detail_sample_rate)}${context.getString(R.string.detail_separator)}${dbSampleRate / 1000.0} kHz
                 ${context.getString(R.string.detail_bit_depth)}${context.getString(R.string.detail_separator)}$dbBits bit
@@ -502,7 +546,7 @@ fun FullScreenPlayer(
                 ${context.getString(R.string.detail_bitrate)}${context.getString(R.string.detail_separator)}${br / 1000} kbps
                 ${context.getString(R.string.detail_gain)}${context.getString(R.string.detail_separator)}${if (dbGain != 0f) String.format("%.2f dB", dbGain) else context.getString(R.string.gain_not_detected)}
 
-                📁 ${context.getString(R.string.detail_section_file_stats)}
+                ${context.getString(R.string.detail_section_file_stats)}
                 ${context.getString(R.string.detail_size)}${context.getString(R.string.detail_separator)}$sizeStr
                 ${context.getString(R.string.detail_duration)}${context.getString(R.string.detail_separator)}${formatTime(durationMs)}
                 ${context.getString(R.string.detail_play_count)}${context.getString(R.string.detail_separator)}$playCount ${context.getString(R.string.detail_play_count_unit)}
@@ -683,6 +727,7 @@ fun FullScreenPlayer(
                                 Toast.makeText(context, context.getString(R.string.bitperfect_speed_locked), Toast.LENGTH_SHORT).show()
                             } else {
                                 playbackSpeed = speed
+                                prefs.edit().putFloat("playback_speed", speed).apply()
                                 mediaController?.playbackParameters = PlaybackParameters(speed, speed)
                             }
                         }
@@ -1586,43 +1631,188 @@ fun FullScreenPlayer(
                         .verticalScroll(rememberScrollState())
                         .fillMaxWidth()
                 ) {
-                    Text(
-                        detailedInfo,
-                        style = MaterialTheme.typography.bodyMedium,
-                        lineHeight = 22.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val info = songDetailsInfo
+                    if (info != null) {
+                        // 1. Audio Specs Card
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.GraphicEq,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = stringResource(R.string.detail_section_audio_specs),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                    ) {
+                                        Text(
+                                            text = "${info.qualityLabel} · ${info.extName}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                Spacer(Modifier.height(8.dp))
 
-                    Spacer(Modifier.height(16.dp))
+                                DetailRow(stringResource(R.string.detail_sample_rate), info.sampleRateKhz)
+                                DetailRow(stringResource(R.string.detail_bit_depth), "${info.bitDepth} bit")
+                                DetailRow(stringResource(R.string.detail_channels), "${info.channels} (${info.channelLabel})")
+                                DetailRow(stringResource(R.string.detail_bitrate), "${info.bitrateKbps} kbps")
+                                DetailRow(stringResource(R.string.detail_gain), info.gain)
+                            }
+                        }
+
+                        // 2. Basic Info Card
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Audiotrack,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.detail_section_basic),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                Spacer(Modifier.height(8.dp))
+
+                                DetailRow(stringResource(R.string.detail_title), info.title)
+                                DetailRow(stringResource(R.string.detail_artist), info.artist)
+                                DetailRow(stringResource(R.string.detail_album), info.album)
+                                DetailRow(stringResource(R.string.detail_genre), info.genre)
+                                DetailRow(stringResource(R.string.detail_year), info.year)
+                            }
+                        }
+
+                        // 3. File & Footprint Card
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.detail_section_file_stats),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                Spacer(Modifier.height(8.dp))
+
+                                DetailRow(stringResource(R.string.detail_size), info.sizeStr)
+                                DetailRow(stringResource(R.string.detail_duration), formatTime(info.durationMs))
+                                DetailRow(stringResource(R.string.detail_play_count), "${info.playCount} ${stringResource(R.string.detail_play_count_unit)}")
+                                DetailRow(stringResource(R.string.detail_last_played), info.lastPlayedStr)
+                                DetailRow(stringResource(R.string.detail_last_modified), info.lastModifiedStr)
+                                DetailRow(stringResource(R.string.detail_path), info.path)
+                            }
+                        }
+                    } else {
+                        Text(
+                            detailedInfo,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 22.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Spacer(Modifier.height(12.dp))
 
                     // --- Spectrogram Section ---
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
-                    Spacer(Modifier.height(16.dp))
-
-                    Text(stringResource(R.string.acoustic_audit_title), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Analytics,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.acoustic_audit_title),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
 
                     if (isDetectingSpectrogram) {
                         Column(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             if (isFullTrackDetecting) {
+                                val animatedProgress by animateFloatAsState(
+                                    targetValue = detectionProgress,
+                                    animationSpec = tween(durationMillis = 100, easing = LinearEasing),
+                                    label = "DetectionProgress"
+                                )
                                 LinearProgressIndicator(
-                                    progress = { detectionProgress },
+                                    progress = { animatedProgress },
                                     modifier = Modifier.fillMaxWidth(0.85f).height(6.dp).clip(RoundedCornerShape(3.dp)),
                                     color = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(10.dp))
                                 Text(
-                                    stringResource(R.string.decoding_pcm_fft_progress, (detectionProgress * 100).toInt()),
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    stringResource(R.string.decoding_pcm_fft_progress, (animatedProgress * 100).toInt().coerceIn(0, 100)),
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.height(12.dp))
-                                Text(stringResource(R.string.decoding_pcm_fft), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(10.dp))
+                                Text(stringResource(R.string.decoding_pcm_fft), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     } else if (spectrogramResult == null) {
@@ -1666,7 +1856,11 @@ fun FullScreenPlayer(
                                                 audioPath = audioPath,
                                                 context = context,
                                                 fullTrack = true,
-                                                onProgress = { p -> detectionProgress = p }
+                                                onProgress = { p ->
+                                                    scope.launch(Dispatchers.Main) {
+                                                        detectionProgress = p
+                                                    }
+                                                }
                                             )
                                             spectrogramResult = res
                                             if (res == null) {
@@ -1694,13 +1888,10 @@ fun FullScreenPlayer(
                     } else {
                         val res = spectrogramResult!!
                         Column {
-                            // Verdict Badge
-                            // 颜色由判断结果的"严重程度"决定，不再拿截止频率去比：
-                            // 以前 cutoffHz >= 18000 就显示橙色，而 MP3 本身是有损格式，和截止频率没有关系
                             val badgeColor = when (res.level) {
-                                0 -> Color(0xFF2E7D32) // 绿：没发现问题
-                                1 -> Color(0xFFEF6C00) // 橙：有损格式 / 来源存疑
-                                else -> Color(0xFFC62828) // 红：很可能是有损转码
+                                0 -> Color(0xFF2E7D32)
+                                1 -> Color(0xFFEF6C00)
+                                else -> Color(0xFFC62828)
                             }
 
                             val badgeBgColor = badgeColor.copy(alpha = 0.15f)
@@ -1728,70 +1919,158 @@ fun FullScreenPlayer(
 
                             Spacer(Modifier.height(12.dp))
 
-                            // High-res Spek-style color map bitmap visualizer
                             val axisNyquistKhz = res.sampleRate / 2000.0f
                             val modeTag = if (res.isFullTrack) stringResource(R.string.spectrogram_full_mode_badge) else stringResource(R.string.spectrogram_quick_mode_badge)
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                ) {
+                                    Text(
+                                        text = modeTag,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Text(
+                                    text = stringResource(
+                                        R.string.spectrogram_cutoff_label,
+                                        String.format(Locale.US, "%.1f", res.cutoffHz / 1000.0f),
+                                        String.format(Locale.US, "%.1f", axisNyquistKhz)
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+
+                            val durationSec = if (res.durationUs > 0) (res.durationUs / 1_000_000L).toInt() else 240
+                            val dialogScrollWidth = if (res.isFullTrack) maxOf(500.dp, (durationSec * 3.5f).dp) else Dp.Unspecified
+
+                            if (res.isFullTrack) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF0A0A1E))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .width(dialogScrollWidth)
+                                                .clickable { showSpectrogramViewer = true }
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+                                                Image(
+                                                    bitmap = res.bitmap.asImageBitmap(),
+                                                    contentDescription = "Spek Spectrogram",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.FillBounds
+                                                )
+
+                                                Column(
+                                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("${String.format(Locale.US, "%.0f", axisNyquistKhz)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                    }
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("${String.format(Locale.US, "%.0f", axisNyquistKhz * 2 / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                    }
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("${String.format(Locale.US, "%.0f", axisNyquistKhz / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                    }
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("0 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                    }
+                                                }
+                                            }
+
+                                            TimeAxisBar(
+                                                durationSec = durationSec,
+                                                isFullTrack = true,
+                                                modifier = Modifier.fillMaxWidth().height(24.dp).background(Color(0xFF070712))
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF0A0A1E))
+                                        .clickable { showSpectrogramViewer = true }
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+                                            Image(
+                                                bitmap = res.bitmap.asImageBitmap(),
+                                                contentDescription = "Spek Spectrogram",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.FillBounds
+                                            )
+
+                                            Column(
+                                                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("${String.format(Locale.US, "%.0f", axisNyquistKhz)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                    Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("${String.format(Locale.US, "%.0f", axisNyquistKhz * 2 / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                    Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("${String.format(Locale.US, "%.0f", axisNyquistKhz / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                    Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("0 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+                                                    Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
+                                                }
+                                            }
+                                        }
+
+                                        TimeAxisBar(
+                                            durationSec = 20,
+                                            isFullTrack = false,
+                                            modifier = Modifier.fillMaxWidth().height(24.dp).background(Color(0xFF070712))
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = stringResource(R.string.spectrogram_cutoff_label, String.format("%.1f", res.cutoffHz / 1000.0f), String.format("%.1f", axisNyquistKhz)),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = if (res.isFullTrack) stringResource(R.string.spectrogram_dialog_scroll_hint) else stringResource(R.string.spectrogram_dialog_tap_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
                                 )
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-                                ) {
-                                    Text(
-                                        text = modeTag,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF0A0A1E))
-                                    .clickable { showSpectrogramViewer = true }
-                            ) {
-                                Image(
-                                    bitmap = res.bitmap.asImageBitmap(),
-                                    contentDescription = "Spek Spectrogram",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.FillBounds
-                                )
-
-                                Column(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${String.format("%.0f", axisNyquistKhz)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
-                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
-                                    }
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${String.format("%.0f", axisNyquistKhz * 2 / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
-                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
-                                    }
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${String.format("%.0f", axisNyquistKhz / 3)} kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
-                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
-                                    }
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("0 kHz", color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
-                                        Box(modifier = Modifier.weight(1f).height(1.dp).padding(horizontal = 4.dp).background(Color.White.copy(alpha = 0.15f)))
-                                    }
-                                }
                             }
 
                             if (!res.isFullTrack) {
@@ -1807,7 +2086,11 @@ fun FullScreenPlayer(
                                                     audioPath = audioPath,
                                                     context = context,
                                                     fullTrack = true,
-                                                    onProgress = { p -> detectionProgress = p }
+                                                    onProgress = { p ->
+                                                    scope.launch(Dispatchers.Main) {
+                                                        detectionProgress = p
+                                                    }
+                                                }
                                                 )
                                                 if (fullRes != null) {
                                                     spectrogramResult = fullRes
@@ -2693,7 +2976,14 @@ fun FullscreenSpectrogramViewer(
     onDismiss: () -> Unit
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    val specDurationSec = if (result.isFullTrack) {
+        if (result.durationUs > 0) (result.durationUs / 1_000_000L).toInt() else 240
+    } else {
+        20
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -2713,7 +3003,7 @@ fun FullscreenSpectrogramViewer(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) {
@@ -2723,7 +3013,7 @@ fun FullscreenSpectrogramViewer(
                             tint = Color.White
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = title,
@@ -2734,15 +3024,46 @@ fun FullscreenSpectrogramViewer(
                         )
                         val axisNyquistKhz = result.sampleRate / 2000.0f
                         val modeTag = if (result.isFullTrack) stringResource(R.string.spectrogram_full_mode_badge) else stringResource(R.string.spectrogram_quick_mode_badge)
-                        Text(
-                            text = "$modeTag · ${String.format("%.1f", result.cutoffHz / 1000.0f)} kHz / Nyquist ${String.format("%.1f", axisNyquistKhz)} kHz",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.7f),
-                            maxLines = 1
-                        )
+                        val durLabel = if (result.isFullTrack) {
+                            val m = specDurationSec / 60
+                            val s = specDurationSec % 60
+                            String.format(Locale.US, " · %02d:%02d", m, s)
+                        } else {
+                            " · 0s-20s"
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                            ) {
+                                Text(
+                                    text = modeTag,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Cutoff: ~${String.format(Locale.US, "%.1f", result.cutoffHz / 1000.0f)} kHz · Nyquist: ${String.format(Locale.US, "%.1f", axisNyquistKhz)} kHz$durLabel",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = Color.White.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    if (scale > 1.05f) {
-                        TextButton(onClick = { scale = 1f; offset = Offset.Zero }) {
+                    if (scale > 1.05f || offsetX < -20f) {
+                        TextButton(
+                            onClick = {
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                        ) {
                             Text("1x", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -2753,80 +3074,202 @@ fun FullscreenSpectrogramViewer(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF030308))
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    if (scale > 1.2f) {
-                                        scale = 1f
-                                        offset = Offset.Zero
-                                    } else {
-                                        scale = 2.5f
-                                    }
-                                }
-                            )
-                        }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = (scale * zoom).coerceIn(1f, 6f)
-                                scale = newScale
-                                val maxOffsetX = (size.width.toFloat() * (newScale - 1f)) / 2f
-                                val maxOffsetY = (size.height.toFloat() * (newScale - 1f)) / 2f
-                                offset = if (newScale > 1f) {
-                                    Offset(
-                                        x = (offset.x + pan.x).coerceIn(-maxOffsetX, maxOffsetX),
-                                        y = (offset.y + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
-                                    )
-                                } else {
-                                    Offset.Zero
-                                }
-                            }
-                        }
                 ) {
+                    val density = LocalDensity.current
+                    val containerWidthPx = with(density) { maxWidth.toPx() }
+                    val containerHeightPx = with(density) { maxHeight.toPx() }
+
+                    val baseTrackWidth = if (result.isFullTrack) {
+                        maxOf(maxWidth, (specDurationSec * 5.0f).dp)
+                    } else {
+                        maxWidth
+                    }
+                    val baseTrackWidthPx = with(density) { baseTrackWidth.toPx() }
+                    val timeAxisHeightDp = 28.dp
+                    val timeAxisHeightPx = with(density) { timeAxisHeightDp.toPx() }
+                    val specHeightPx = (containerHeightPx - timeAxisHeightPx).coerceAtLeast(100f)
+
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = offset.x
-                                translationY = offset.y
+                            .clipToBounds()
+                            .pointerInput(baseTrackWidthPx, containerWidthPx) {
+                                detectTapGestures(
+                                    onDoubleTap = { tapOffset ->
+                                        if (scale > 1.2f) {
+                                            scale = 1f
+                                            val minX = (containerWidthPx - baseTrackWidthPx).coerceAtMost(0f)
+                                            offsetX = offsetX.coerceIn(minX, 0f)
+                                            offsetY = 0f
+                                        } else {
+                                            val targetScale = 2.5f
+                                            scale = targetScale
+                                            val curTotalW = baseTrackWidthPx * targetScale
+                                            val minX = (containerWidthPx - curTotalW).coerceAtMost(0f)
+                                            offsetX = ((offsetX - tapOffset.x) * (targetScale / 1f) + tapOffset.x).coerceIn(minX, 0f)
+                                        }
+                                    }
+                                )
+                            }
+                            .pointerInput(baseTrackWidthPx, containerWidthPx) {
+                                detectTransformGestures { centroid, pan, zoom, _ ->
+                                    val newScale = (scale * zoom).coerceIn(1f, 6f)
+                                    val oldScale = scale
+                                    scale = newScale
+
+                                    val curTotalW = baseTrackWidthPx * newScale
+                                    val minX = (containerWidthPx - curTotalW).coerceAtMost(0f)
+
+                                    if (oldScale != newScale) {
+                                        val scaleChange = newScale / oldScale
+                                        offsetX = ((offsetX - centroid.x) * scaleChange + centroid.x + pan.x).coerceIn(minX, 0f)
+                                    } else {
+                                        offsetX = (offsetX + pan.x).coerceIn(minX, 0f)
+                                    }
+
+                                    val maxY = if (newScale > 1f) (specHeightPx * (newScale - 1f)) / 2f else 0f
+                                    offsetY = if (newScale > 1f) (offsetY + pan.y).coerceIn(-maxY, maxY) else 0f
+                                }
                             }
                     ) {
-                        Image(
-                            bitmap = result.bitmap.asImageBitmap(),
-                            contentDescription = "Spek Spectrogram",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.FillBounds
-                        )
-
-                        // High precision frequency grid lines
-                        val axisNyquistKhz = result.sampleRate / 2000.0f
-                        Column(
+                        // Scalable & pannable content container
+                        Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
+                                .width(baseTrackWidth)
+                                .fillMaxHeight()
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                    translationX = offsetX
+                                    translationY = offsetY
+                                }
                         ) {
-                            for (step in 4 downTo 0) {
-                                val khz = axisNyquistKhz * step / 4f
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                // Spectrogram and canvas lines
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    Image(
+                                        bitmap = result.bitmap.asImageBitmap(),
+                                        contentDescription = "Spek Spectrogram",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.FillBounds
+                                    )
+
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val nyquistHz = result.sampleRate / 2f
+                                        val w = size.width
+                                        val h = size.height
+
+                                        for (step in 1..4) {
+                                            val ratio = step / 5f
+                                            val y = h * (1f - ratio)
+                                            drawLine(
+                                                color = Color.White.copy(alpha = 0.15f),
+                                                start = Offset(0f, y),
+                                                end = Offset(w, y),
+                                                strokeWidth = 1f
+                                            )
+                                        }
+
+                                        if (result.cutoffHz >= 1000 && result.cutoffHz <= nyquistHz.toInt()) {
+                                            val cutoffRatio = (result.cutoffHz / nyquistHz).coerceIn(0f, 1f)
+                                            val cutoffY = h * (1f - cutoffRatio)
+                                            drawLine(
+                                                color = Color(0xFFFFB74D).copy(alpha = 0.85f),
+                                                start = Offset(0f, cutoffY),
+                                                end = Offset(w, cutoffY),
+                                                strokeWidth = 2.5f,
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f), 0f)
+                                            )
+                                        }
+
+                                        val totalDuration = specDurationSec
+                                        val intervalSec = if (result.isFullTrack) {
+                                            when {
+                                                totalDuration <= 60 -> 10
+                                                totalDuration <= 180 -> 20
+                                                totalDuration <= 360 -> 30
+                                                totalDuration <= 720 -> 60
+                                                else -> 120
+                                            }
+                                        } else {
+                                            5
+                                        }
+                                        var t = intervalSec
+                                        while (t < totalDuration) {
+                                            val x = w * (t.toFloat() / totalDuration)
+                                            drawLine(
+                                                color = Color.White.copy(alpha = 0.12f),
+                                                start = Offset(x, 0f),
+                                                end = Offset(x, h),
+                                                strokeWidth = 1f,
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                                            )
+                                            t += intervalSec
+                                        }
+                                    }
+                                }
+
+                                TimeAxisBar(
+                                    durationSec = specDurationSec,
+                                    isFullTrack = result.isFullTrack,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(timeAxisHeightDp)
+                                        .background(Color(0xFF0A0A16))
+                                )
+                            }
+                        }
+
+                        // Pinned Frequency Ruler on Left Edge
+                        val axisNyquistKhz = result.sampleRate / 2000.0f
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .width(56.dp)
+                                .height(with(density) { specHeightPx.toDp() })
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color(0xFF030308).copy(alpha = 0.85f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
+                                .padding(start = 6.dp, top = 4.dp, bottom = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                for (step in 4 downTo 0) {
+                                    val khz = axisNyquistKhz * step / 4f
+                                    Text(
+                                        text = "${String.format(Locale.US, "%.1f", khz)}k",
+                                        color = Color.White.copy(alpha = 0.75f),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                                    )
+                                }
+                            }
+
+                            if (result.cutoffHz >= 1000 && result.cutoffHz <= result.sampleRate / 2) {
+                                val cutoffRatio = (result.cutoffHz / (result.sampleRate / 2f)).coerceIn(0f, 1f)
+                                val cutoffYFraction = 1f - cutoffRatio
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFEF6C00).copy(alpha = 0.9f),
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(top = with(density) { ((specHeightPx - 20f) * cutoffYFraction).toDp() })
                                 ) {
                                     Text(
-                                        text = "${String.format("%.1f", khz)} kHz",
-                                        color = Color.White.copy(alpha = 0.65f),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        modifier = Modifier.width(54.dp)
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(0.5.dp)
-                                            .background(Color.White.copy(alpha = 0.2f))
+                                        text = "${String.format(Locale.US, "%.1f", result.cutoffHz / 1000f)}k",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
                                     )
                                 }
                             }
@@ -2838,7 +3281,7 @@ fun FullscreenSpectrogramViewer(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     val badgeColor = when (result.level) {
                         0 -> Color(0xFF4CAF50)
@@ -2859,13 +3302,13 @@ fun FullscreenSpectrogramViewer(
                             color = badgeColor
                         )
                     }
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         text = result.verdictDetails,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.8f)
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         text = stringResource(R.string.spectrogram_viewer_gesture_hint),
                         style = MaterialTheme.typography.labelSmall,
@@ -2876,6 +3319,171 @@ fun FullscreenSpectrogramViewer(
                 }
             }
         }
+    }
+}
+
+data class SongDetailsInfo(
+    val title: String,
+    val artist: String,
+    val album: String,
+    val genre: String,
+    val year: String,
+    val durationMs: Long,
+    val qualityLabel: String,
+    val extName: String,
+    val sampleRateKhz: String,
+    val bitDepth: Int,
+    val channels: Int,
+    val channelLabel: String,
+    val bitrateKbps: Long,
+    val gain: String,
+    val sizeStr: String,
+    val playCount: Int,
+    val lastPlayedStr: String,
+    val lastModifiedStr: String,
+    val path: String
+)
+
+@Composable
+private fun DetailRow(label: String, value: String, isMono: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontWeight = FontWeight.Medium,
+                fontFamily = if (isMono) FontFamily.Monospace else FontFamily.Default
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.padding(start = 12.dp)
+        )
+    }
+}
+
+@Composable
+fun TimeAxisBar(
+    durationSec: Int,
+    isFullTrack: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+
+        drawLine(
+            color = Color.White.copy(alpha = 0.25f),
+            start = Offset(0f, 0f),
+            end = Offset(w, 0f),
+            strokeWidth = 1f
+        )
+
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(180, 255, 255, 255)
+            textSize = with(density) { 10.sp.toPx() }
+            isAntiAlias = true
+        }
+
+        val tickColor = android.graphics.Color.argb(120, 255, 255, 255)
+        val tickPaint = android.graphics.Paint().apply {
+            color = tickColor
+            strokeWidth = with(density) { 1.dp.toPx() }
+            isAntiAlias = true
+        }
+
+        val totalDuration = if (durationSec > 0) durationSec else if (isFullTrack) 240 else 20
+        val intervalSec = if (isFullTrack) {
+            when {
+                totalDuration <= 60 -> 10
+                totalDuration <= 180 -> 20
+                totalDuration <= 360 -> 30
+                totalDuration <= 720 -> 60
+                else -> 120
+            }
+        } else {
+            5
+        }
+
+        // 终点真实时长文本与边界测量
+        val endText = if (isFullTrack) {
+            val mins = totalDuration / 60
+            val secs = totalDuration % 60
+            String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
+        } else {
+            "${totalDuration}s"
+        }
+        val endTextWidth = paint.measureText(endText)
+        val edgePadding = with(density) { 4.dp.toPx() }
+        val endTextRight = w - edgePadding
+        val endTextLeft = endTextRight - endTextWidth
+        val minCollisionMargin = with(density) { 8.dp.toPx() }
+
+        var lastDrawnTextRight = -1000f
+
+        var t = 0
+        while (t < totalDuration) {
+            val frac = (t.toFloat() / totalDuration).coerceIn(0f, 1f)
+            val x = w * frac
+
+            drawContext.canvas.nativeCanvas.drawLine(x, 0f, x, with(density) { 5.dp.toPx() }, tickPaint)
+
+            val text = if (isFullTrack) {
+                val mins = t / 60
+                val secs = t % 60
+                String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
+            } else {
+                "${t}s"
+            }
+            val textWidth = paint.measureText(text)
+
+            val textLeft: Float
+            val textX: Float
+            val textRight: Float
+
+            if (t == 0 || x < textWidth / 2f + edgePadding) {
+                paint.textAlign = android.graphics.Paint.Align.LEFT
+                textX = edgePadding
+                textLeft = edgePadding
+                textRight = edgePadding + textWidth
+            } else {
+                paint.textAlign = android.graphics.Paint.Align.CENTER
+                textX = x
+                textLeft = x - textWidth / 2f
+                textRight = x + textWidth / 2f
+            }
+
+            // 严格防文字重叠：如果距离上一个标签或末尾标签太近，则跳过中间该数字的绘制（仍保留刻度线）
+            val collidesWithPrevious = textLeft < lastDrawnTextRight + minCollisionMargin
+            val collidesWithEnd = textRight > endTextLeft - minCollisionMargin
+
+            if (!collidesWithPrevious && !collidesWithEnd) {
+                val textY = h - with(density) { 4.dp.toPx() }
+                drawContext.canvas.nativeCanvas.drawText(text, textX, textY, paint)
+                lastDrawnTextRight = textRight
+            }
+
+            t += intervalSec
+        }
+
+        // 终点刻度线与终点标签（绝对靠右对齐，确保曲尾时间精准且永远不会被其它数字重叠遮挡）
+        drawContext.canvas.nativeCanvas.drawLine(w, 0f, w, with(density) { 5.dp.toPx() }, tickPaint)
+        paint.textAlign = android.graphics.Paint.Align.RIGHT
+        val textY = h - with(density) { 4.dp.toPx() }
+        drawContext.canvas.nativeCanvas.drawText(endText, endTextRight, textY, paint)
     }
 }
 

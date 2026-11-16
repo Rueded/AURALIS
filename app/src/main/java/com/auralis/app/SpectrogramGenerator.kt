@@ -8,6 +8,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -207,7 +208,21 @@ object SpectrogramGenerator {
         val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
         var sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
         var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1) else 2
-        val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+        var durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+
+        // 双重校验时长：某些无损/压缩音轨 MediaFormat 返回 0 或偏差较大，用 MediaMetadataRetriever 修正
+        try {
+            val mmr = MediaMetadataRetriever()
+            mmr.setDataSource(audioPath)
+            val ms = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (ms > 0L) {
+                val mmrUs = ms * 1000L
+                if (durationUs <= 0L || Math.abs(mmrUs - durationUs) > 2_000_000L) {
+                    durationUs = mmrUs
+                }
+            }
+            mmr.release()
+        } catch (ignored: Exception) {}
 
         // 防止部分三星手机解码器在 KEY_MAX_INPUT_SIZE 为 0 时直接抛异常
         if (!format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
@@ -274,6 +289,7 @@ object SpectrogramGenerator {
         var isOutputEOS = false
         var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
         var emptyCycles = 0
+        var lastReportedProgress = 0f
 
         // 解码从文件头部（0ms）自然开始：绝不对未内嵌 SeekTable 的 44.1kHz FLAC / CD 音轨进行粗暴的线性 seekTo()，
         // 彻底根除三星 One UI 独有的 SecFLACExtractor 线性插值丢失同步帧 (0xFFF8) 导致的解析失败！
@@ -472,10 +488,11 @@ object SpectrogramGenerator {
                             isOutputEOS = true
                         }
 
-                        if (fullTrack && durationUs > 0) {
-                            val curUs = extractor.sampleTime
-                            if (curUs > 0) {
-                                val p = (curUs.toFloat() / durationUs).coerceIn(0f, 0.98f)
+                        if (fullTrack) {
+                            val totalExpectedSamples = if (durationUs > 0) (durationUs * sampleRate / 1_000_000L).coerceAtLeast(1L) else estimatedTotalSamples
+                            val p = (totalAudioSamplesSeen.toDouble() / totalExpectedSamples.toDouble()).toFloat().coerceIn(0f, 0.98f)
+                            if (p - lastReportedProgress >= 0.01f || (p > lastReportedProgress && p >= 0.95f)) {
+                                lastReportedProgress = p
                                 onProgress?.invoke(p)
                             }
                         }
@@ -512,9 +529,33 @@ object SpectrogramGenerator {
             extractor.release()
         }
 
+        val finalDurationUs = if (durationUs > 0L) durationUs else if (sampleRate > 0) (totalAudioSamplesSeen * 1_000_000L / sampleRate) else 0L
+
+        // 全曲模式：补齐最后一帧尾部样本，确保曲尾渐弱或结尾不被丢弃
+        if (fullTrack && ringWritePos >= fftSize && totalAudioSamplesSeen > nextFftTargetSample - (hopStep / 2)) {
+            val startPos = ringWritePos - fftSize
+            for (i in 0 until fftSize) {
+                re[i] = ringBuffer[(startPos + i) and ringMask] * hannWindow[i]
+                im[i] = 0f
+            }
+            fft(re, im)
+            val mags = FloatArray(numBins)
+            for (bin in 0 until numBins) {
+                val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                mags[bin] = mag
+                sumMagnitudes[bin] += mag
+                sumPower[bin] += (mag * mag).toDouble()
+            }
+            magnitudeColumns.add(mags)
+        }
+
         val numFrames: Int
         val magnitudeMatrix: Array<FloatArray>
         val analysisPower: DoubleArray
+
+        if (fullTrack) {
+            onProgress?.invoke(0.99f)
+        }
 
         if (!fullTrack) {
             var actualSamples = totalSamplesDecoded
@@ -653,9 +694,12 @@ object SpectrogramGenerator {
         }
 
         bmp.setPixels(pixels, 0, numFrames, 0, 0, numFrames, numBins)
+        if (fullTrack) {
+            onProgress?.invoke(1.0f)
+        }
 
         Log.d(TAG, "Acoustic detection completed: $cutoffHz Hz -> $verdict")
-        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless, sampleRate, level, fullTrack, durationUs)
+        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless, sampleRate, level, fullTrack, finalDurationUs)
     }
 
     private fun fft(re: FloatArray, im: FloatArray) {

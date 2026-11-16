@@ -13,8 +13,8 @@ android {
         applicationId = "com.auralis.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "11.2"
+        versionCode = 16
+        versionName = "11.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

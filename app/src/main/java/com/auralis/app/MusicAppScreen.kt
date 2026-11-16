@@ -919,7 +919,12 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                 PremiumTabBar(
                     tabs = tabs,
                     selectedIndex = pagerState.currentPage,
-                    onTabSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } }
+                    onTabSelected = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+                    onTabDoubleTap = { index ->
+                        if (index == 0) {
+                            scope.launch { mainListState.animateScrollToItem(0) }
+                        }
+                    }
                 )
 
                 if (!hasPermission) {

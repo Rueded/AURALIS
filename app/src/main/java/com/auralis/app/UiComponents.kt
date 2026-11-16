@@ -7,10 +7,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.*
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -93,12 +95,13 @@ fun HomeAmbientBackground(
 }
 
 /** 胶囊式 Tab，替代默认 ScrollableTabRow */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PremiumTabBar(
     tabs: List<String>,
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
+    onTabDoubleTap: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val primary = MaterialTheme.colorScheme.primary
@@ -123,14 +126,19 @@ fun PremiumTabBar(
             )
 
             Surface(
-                onClick = { onTabSelected(index) },
                 shape = RoundedCornerShape(20.dp),
                 color = bg,
                 border = if (selected) null else BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
                 ),
-                modifier = Modifier.height(36.dp)
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .combinedClickable(
+                        onClick = { onTabSelected(index) },
+                        onDoubleClick = { onTabDoubleTap?.invoke(index) }
+                    )
             ) {
                 Box(
                     modifier = Modifier.padding(horizontal = 16.dp),
