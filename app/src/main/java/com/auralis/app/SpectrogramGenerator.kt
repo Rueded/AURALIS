@@ -3,13 +3,18 @@ package com.auralis.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.media.AudioFormat
 import android.media.MediaCodec
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
+import java.nio.ByteOrder
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -24,7 +29,9 @@ object SpectrogramGenerator {
         val isLossless: Boolean,
         val sampleRate: Int,
         /** 0 = 没发现问题（绿）  1 = 需要留意（橙）  2 = 很可能有问题（红）。界面用它决定徽章颜色，不再自己拿截止频率去比。 */
-        val level: Int = 0
+        val level: Int = 0,
+        val isFullTrack: Boolean = false,
+        val durationUs: Long = 0L
     )
 
     // ───────────────────────── 判断用到的常量和小工具 ─────────────────────────
@@ -122,7 +129,42 @@ object SpectrogramGenerator {
         return Evidence(if (isCliff) ((bestK + 0.5) * binHz).toFloat() else null, displayCutoff)
     }
 
-    suspend fun generate(audioPath: String, context: Context): Result? = withContext(Dispatchers.IO) {
+    /**
+     * 针对 Spek 频谱检测：优先选用 Google 官方 AOSP 标准音频解码器 (c2.android.* / OMX.google.*)，
+     * 避免三星私有硬件解码器 (c2.sec.*) 在 seek 后因缺少初始关键帧而报错 0x80000000 或卡死丢帧。
+     */
+    private fun createSafeAudioDecoder(mime: String): MediaCodec {
+        return try {
+            val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
+            val preferredName = codecList.codecInfos
+                .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+                .sortedBy { info ->
+                    val name = info.name.lowercase()
+                    when {
+                        name.startsWith("c2.android.") || name.startsWith("omx.google.") -> 0
+                        name.contains(".sec.") || name.contains("samsung") -> 2
+                        else -> 1
+                    }
+                }
+                .firstOrNull()?.name
+
+            if (preferredName != null) {
+                Log.d(TAG, "Using preferred safe decoder: $preferredName for $mime")
+                MediaCodec.createByCodecName(preferredName)
+            } else {
+                MediaCodec.createDecoderByType(mime)
+            }
+        } catch (_: Exception) {
+            MediaCodec.createDecoderByType(mime)
+        }
+    }
+
+    suspend fun generate(
+        audioPath: String,
+        context: Context,
+        fullTrack: Boolean = false,
+        onProgress: ((Float) -> Unit)? = null
+    ): Result? = withContext(Dispatchers.IO) {
         val file = File(audioPath)
         if (!file.exists()) {
             Log.e(TAG, "Audio file does not exist: $audioPath")
@@ -131,11 +173,17 @@ object SpectrogramGenerator {
 
         val extractor = MediaExtractor()
         try {
-            extractor.setDataSource(audioPath)
+            FileInputStream(file).use { fis ->
+                extractor.setDataSource(fis.fd)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to set data source: ${e.message}")
-            extractor.release()
-            return@withContext null
+            try {
+                extractor.setDataSource(audioPath)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to set data source: ${e2.message}")
+                extractor.release()
+                return@withContext null
+            }
         }
 
         var trackIndex = -1
@@ -157,45 +205,85 @@ object SpectrogramGenerator {
         extractor.selectTrack(trackIndex)
         val format = extractor.getTrackFormat(trackIndex)
         val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-        val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
-        val channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+        var sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
+        var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1) else 2
         val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
 
-        // We target 20 seconds of audio sample
+        // 防止部分三星手机解码器在 KEY_MAX_INPUT_SIZE 为 0 时直接抛异常
+        if (!format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
+        }
+
+        val fftSize = 2048
+        val numBins = fftSize / 2 // 1024 bins
+        val hannWindow = FloatArray(fftSize) { i ->
+            0.5f * (1.0f - Math.cos(2.0 * Math.PI * i / (fftSize - 1)).toFloat())
+        }
+        val re = FloatArray(fftSize)
+        val im = FloatArray(fftSize)
+
+        // 快速模式（20秒） vs 全曲深度模式缓冲参数
         val targetSeconds = 20
         val targetSamples = sampleRate * targetSeconds
-        val sampleData = FloatArray(targetSamples)
+        val sampleData = if (!fullTrack) FloatArray(targetSamples) else FloatArray(0)
         var totalSamplesDecoded = 0
 
-        val codec = try {
-            MediaCodec.createDecoderByType(mime)
+        // 全曲模式：流式环形缓冲 + 自适应 HopStep，避免大内存分配与 GPU 纹理溢出
+        val estimatedTotalSamples = if (durationUs > 0) {
+            (durationUs * sampleRate / 1_000_000L).coerceAtLeast(sampleRate.toLong() * 5L)
+        } else {
+            sampleRate.toLong() * 240L
+        }
+        val targetColumns = 2000
+        val hopStep = maxOf(512L, estimatedTotalSamples / targetColumns)
+        val ringSize = 4096
+        val ringMask = ringSize - 1
+        val ringBuffer = if (fullTrack) FloatArray(ringSize) else FloatArray(0)
+        var ringWritePos = 0
+        var totalAudioSamplesSeen = 0L
+        var nextFftTargetSample = 0L
+        val magnitudeColumns = if (fullTrack) ArrayList<FloatArray>(2400) else ArrayList<FloatArray>(0)
+        val sumMagnitudes = FloatArray(numBins)
+        val sumPower = DoubleArray(numBins)
+
+        var codec = try {
+            createSafeAudioDecoder(mime)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create decoder for MIME $mime: ${e.message}")
-            extractor.release()
-            return@withContext null
+            MediaCodec.createDecoderByType(mime)
         }
 
         try {
             codec.configure(format, null, null, 0)
             codec.start()
         } catch (e: Exception) {
-            Log.e(TAG, "Codec configuration failed: ${e.message}")
-            codec.release()
-            extractor.release()
-            return@withContext null
+            Log.w(TAG, "Safe decoder configuration failed: ${e.message}, falling back to default decoder")
+            try {
+                codec.release()
+                codec = MediaCodec.createDecoderByType(mime)
+                codec.configure(format, null, null, 0)
+                codec.start()
+            } catch (e2: Exception) {
+                Log.e(TAG, "All decoders failed for $mime: ${e2.message}")
+                extractor.release()
+                return@withContext null
+            }
         }
 
         val bufferInfo = MediaCodec.BufferInfo()
         var isInputEOS = false
         var isOutputEOS = false
+        var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
+        var emptyCycles = 0
 
-        // Seek to 1/3 of the song duration to get a representative sample of the song
-        if (durationUs > 0) {
-            extractor.seekTo(durationUs / 3, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-        }
-
+        // 解码从文件头部（0ms）自然开始：绝不对未内嵌 SeekTable 的 44.1kHz FLAC / CD 音轨进行粗暴的线性 seekTo()，
+        // 彻底根除三星 One UI 独有的 SecFLACExtractor 线性插值丢失同步帧 (0xFFF8) 导致的解析失败！
         try {
-            while (!isOutputEOS && totalSamplesDecoded < targetSamples) {
+            while (!isOutputEOS && (fullTrack || totalSamplesDecoded < targetSamples)) {
+                if (!coroutineContext.isActive) {
+                    Log.d(TAG, "Spectrogram generation cancelled by user")
+                    return@withContext null
+                }
+
                 if (!isInputEOS) {
                     val inputBufferIndex = codec.dequeueInputBuffer(10000)
                     if (inputBufferIndex >= 0) {
@@ -215,35 +303,202 @@ object SpectrogramGenerator {
                 }
 
                 val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
-                if (outputBufferIndex >= 0) {
-                    val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
-                    if (outputBuffer != null) {
-                        outputBuffer.position(bufferInfo.offset)
-                        outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                when {
+                    outputBufferIndex >= 0 -> {
+                        emptyCycles = 0
+                        val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
+                        if (outputBuffer != null && bufferInfo.size > 0) {
+                            outputBuffer.position(bufferInfo.offset)
+                            outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                            outputBuffer.order(ByteOrder.LITTLE_ENDIAN)
 
-                        val shortBuffer = outputBuffer.asShortBuffer()
-                        val chunkSamples = shortBuffer.remaining()
-
-                        var i = 0
-                        while (i < chunkSamples && totalSamplesDecoded < targetSamples) {
-                            var sum = 0f
-                            var count = 0
-                            for (c in 0 until channelCount) {
-                                if (shortBuffer.hasRemaining()) {
-                                    sum += shortBuffer.get().toFloat() / 32768.0f
-                                    count++
+                            when (pcmEncoding) {
+                                AudioFormat.ENCODING_PCM_FLOAT -> {
+                                    val fb = outputBuffer.asFloatBuffer()
+                                    val frames = fb.remaining() / channelCount
+                                    for (f in 0 until frames) {
+                                        var sum = 0f
+                                        for (c in 0 until channelCount) {
+                                            val v = fb.get()
+                                            sum += if (v.isNaN() || v.isInfinite()) 0f else v
+                                        }
+                                        val mono = sum / channelCount
+                                        if (!fullTrack) {
+                                            if (totalSamplesDecoded < targetSamples) {
+                                                sampleData[totalSamplesDecoded++] = mono
+                                            }
+                                        } else {
+                                            ringBuffer[ringWritePos and ringMask] = mono
+                                            ringWritePos++
+                                            totalAudioSamplesSeen++
+                                            if (totalAudioSamplesSeen >= nextFftTargetSample + fftSize && ringWritePos >= fftSize) {
+                                                val startPos = ringWritePos - fftSize
+                                                for (i in 0 until fftSize) {
+                                                    re[i] = ringBuffer[(startPos + i) and ringMask] * hannWindow[i]
+                                                    im[i] = 0f
+                                                }
+                                                fft(re, im)
+                                                val mags = FloatArray(numBins)
+                                                for (bin in 0 until numBins) {
+                                                    val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                                                    mags[bin] = mag
+                                                    sumMagnitudes[bin] += mag
+                                                    sumPower[bin] += (mag * mag).toDouble()
+                                                }
+                                                magnitudeColumns.add(mags)
+                                                nextFftTargetSample += hopStep
+                                            }
+                                        }
+                                    }
+                                }
+                                21 /* AudioFormat.ENCODING_PCM_24BIT_PACKED */ -> {
+                                    val frames = outputBuffer.remaining() / (3 * channelCount)
+                                    for (f in 0 until frames) {
+                                        var sum = 0f
+                                        for (c in 0 until channelCount) {
+                                            val b0 = outputBuffer.get().toInt() and 0xFF
+                                            val b1 = outputBuffer.get().toInt() and 0xFF
+                                            val b2 = outputBuffer.get().toInt()
+                                            val s24 = (b2 shl 16) or (b1 shl 8) or b0
+                                            sum += s24 / 8388608.0f
+                                        }
+                                        val mono = sum / channelCount
+                                        if (!fullTrack) {
+                                            if (totalSamplesDecoded < targetSamples) {
+                                                sampleData[totalSamplesDecoded++] = mono
+                                            }
+                                        } else {
+                                            ringBuffer[ringWritePos and ringMask] = mono
+                                            ringWritePos++
+                                            totalAudioSamplesSeen++
+                                            if (totalAudioSamplesSeen >= nextFftTargetSample + fftSize && ringWritePos >= fftSize) {
+                                                val startPos = ringWritePos - fftSize
+                                                for (i in 0 until fftSize) {
+                                                    re[i] = ringBuffer[(startPos + i) and ringMask] * hannWindow[i]
+                                                    im[i] = 0f
+                                                }
+                                                fft(re, im)
+                                                val mags = FloatArray(numBins)
+                                                for (bin in 0 until numBins) {
+                                                    val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                                                    mags[bin] = mag
+                                                    sumMagnitudes[bin] += mag
+                                                    sumPower[bin] += (mag * mag).toDouble()
+                                                }
+                                                magnitudeColumns.add(mags)
+                                                nextFftTargetSample += hopStep
+                                            }
+                                        }
+                                    }
+                                }
+                                22 /* AudioFormat.ENCODING_PCM_32BIT */ -> {
+                                    val ib = outputBuffer.asIntBuffer()
+                                    val frames = ib.remaining() / channelCount
+                                    for (f in 0 until frames) {
+                                        var sum = 0f
+                                        for (c in 0 until channelCount) {
+                                            sum += ib.get() / 2147483648.0f
+                                        }
+                                        val mono = sum / channelCount
+                                        if (!fullTrack) {
+                                            if (totalSamplesDecoded < targetSamples) {
+                                                sampleData[totalSamplesDecoded++] = mono
+                                            }
+                                        } else {
+                                            ringBuffer[ringWritePos and ringMask] = mono
+                                            ringWritePos++
+                                            totalAudioSamplesSeen++
+                                            if (totalAudioSamplesSeen >= nextFftTargetSample + fftSize && ringWritePos >= fftSize) {
+                                                val startPos = ringWritePos - fftSize
+                                                for (i in 0 until fftSize) {
+                                                    re[i] = ringBuffer[(startPos + i) and ringMask] * hannWindow[i]
+                                                    im[i] = 0f
+                                                }
+                                                fft(re, im)
+                                                val mags = FloatArray(numBins)
+                                                for (bin in 0 until numBins) {
+                                                    val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                                                    mags[bin] = mag
+                                                    sumMagnitudes[bin] += mag
+                                                    sumPower[bin] += (mag * mag).toDouble()
+                                                }
+                                                magnitudeColumns.add(mags)
+                                                nextFftTargetSample += hopStep
+                                            }
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    val shortBuffer = outputBuffer.asShortBuffer()
+                                    val frames = shortBuffer.remaining() / channelCount
+                                    for (f in 0 until frames) {
+                                        var sum = 0f
+                                        for (c in 0 until channelCount) {
+                                            sum += shortBuffer.get().toFloat() / 32768.0f
+                                        }
+                                        val mono = sum / channelCount
+                                        if (!fullTrack) {
+                                            if (totalSamplesDecoded < targetSamples) {
+                                                sampleData[totalSamplesDecoded++] = mono
+                                            }
+                                        } else {
+                                            ringBuffer[ringWritePos and ringMask] = mono
+                                            ringWritePos++
+                                            totalAudioSamplesSeen++
+                                            if (totalAudioSamplesSeen >= nextFftTargetSample + fftSize && ringWritePos >= fftSize) {
+                                                val startPos = ringWritePos - fftSize
+                                                for (i in 0 until fftSize) {
+                                                    re[i] = ringBuffer[(startPos + i) and ringMask] * hannWindow[i]
+                                                    im[i] = 0f
+                                                }
+                                                fft(re, im)
+                                                val mags = FloatArray(numBins)
+                                                for (bin in 0 until numBins) {
+                                                    val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                                                    mags[bin] = mag
+                                                    sumMagnitudes[bin] += mag
+                                                    sumPower[bin] += (mag * mag).toDouble()
+                                                }
+                                                magnitudeColumns.add(mags)
+                                                nextFftTargetSample += hopStep
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            if (count > 0) {
-                                sampleData[totalSamplesDecoded] = sum / count
-                                totalSamplesDecoded++
+                        }
+                        codec.releaseOutputBuffer(outputBufferIndex, false)
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                            isOutputEOS = true
+                        }
+
+                        if (fullTrack && durationUs > 0) {
+                            val curUs = extractor.sampleTime
+                            if (curUs > 0) {
+                                val p = (curUs.toFloat() / durationUs).coerceIn(0f, 0.98f)
+                                onProgress?.invoke(p)
                             }
-                            i += channelCount
                         }
                     }
-                    codec.releaseOutputBuffer(outputBufferIndex, false)
-                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        isOutputEOS = true
+                    outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outFmt = codec.outputFormat
+                        if (outFmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                            val sr = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                            if (sr > 0) sampleRate = sr
+                        }
+                        if (outFmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            val cc = outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                            if (cc > 0) channelCount = cc
+                        }
+                        if (outFmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            pcmEncoding = outFmt.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        }
+                    }
+                    outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        if (isInputEOS) {
+                            emptyCycles++
+                            if (emptyCycles > 40) isOutputEOS = true
+                        }
                     }
                 }
             }
@@ -257,45 +512,61 @@ object SpectrogramGenerator {
             extractor.release()
         }
 
-        val actualSamples = totalSamplesDecoded
-        val fftSize = 2048
-        val hopSize = 1024
-        val numFrames = (actualSamples - fftSize) / hopSize
+        val numFrames: Int
+        val magnitudeMatrix: Array<FloatArray>
+        val analysisPower: DoubleArray
 
-        if (numFrames <= 0) {
-            Log.e(TAG, "Audio sample is too short to generate spectrogram")
-            return@withContext null
-        }
-
-        // Hann window coefficients
-        val hannWindow = FloatArray(fftSize) { i ->
-            0.5f * (1.0f - Math.cos(2.0 * Math.PI * i / (fftSize - 1)).toFloat())
-        }
-
-        val numBins = fftSize / 2 // 1024 bins
-        val magnitudeMatrix = Array(numFrames) { FloatArray(numBins) }
-        val sumMagnitudes = FloatArray(numBins)
-        val sumPower = DoubleArray(numBins)   // 平均功率谱（用来找有损编码的低通悬崖）
-
-        // Process frames
-        val re = FloatArray(fftSize)
-        val im = FloatArray(fftSize)
-
-        for (f in 0 until numFrames) {
-            val startIdx = f * hopSize
-            for (i in 0 until fftSize) {
-                re[i] = sampleData[startIdx + i] * hannWindow[i]
-                im[i] = 0f
+        if (!fullTrack) {
+            var actualSamples = totalSamplesDecoded
+            if (actualSamples < 2048) {
+                Log.e(TAG, "Audio sample is too short to generate spectrogram (actualSamples=$actualSamples)")
+                return@withContext null
             }
 
-            fft(re, im)
-
-            for (bin in 0 until numBins) {
-                val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
-                magnitudeMatrix[f][bin] = mag
-                sumMagnitudes[bin] += mag
-                sumPower[bin] += (mag * mag).toDouble()
+            // 跳过曲首静音片段（最多跳过前 3 秒）：让频谱图展示真实的音乐声学特征，而不是开头的静音
+            val maxSkip = minOf(sampleRate * 3, actualSamples - 2048)
+            var firstAudible = 0
+            while (firstAudible < maxSkip && kotlin.math.abs(sampleData[firstAudible]) < 0.003f) {
+                firstAudible++
             }
+            if (firstAudible in 1 until maxSkip) {
+                System.arraycopy(sampleData, firstAudible, sampleData, 0, actualSamples - firstAudible)
+                actualSamples -= firstAudible
+            }
+
+            val hopSize = 1024
+            numFrames = (actualSamples - fftSize) / hopSize
+            if (numFrames <= 0) {
+                Log.e(TAG, "Audio sample is too short to generate spectrogram")
+                return@withContext null
+            }
+
+            magnitudeMatrix = Array(numFrames) { FloatArray(numBins) }
+            val quickSumPower = DoubleArray(numBins)
+
+            for (f in 0 until numFrames) {
+                val startIdx = f * hopSize
+                for (i in 0 until fftSize) {
+                    re[i] = sampleData[startIdx + i] * hannWindow[i]
+                    im[i] = 0f
+                }
+                fft(re, im)
+                for (bin in 0 until numBins) {
+                    val mag = sqrt(re[bin] * re[bin] + im[bin] * im[bin])
+                    magnitudeMatrix[f][bin] = mag
+                    quickSumPower[bin] += (mag * mag).toDouble()
+                }
+            }
+            analysisPower = quickSumPower
+        } else {
+            numFrames = magnitudeColumns.size
+            if (numFrames < 4) {
+                Log.e(TAG, "Full track audio sample is too short to generate spectrogram (columns=$numFrames)")
+                return@withContext null
+            }
+            magnitudeMatrix = magnitudeColumns.toTypedArray()
+            analysisPower = sumPower
+            onProgress?.invoke(1f)
         }
 
         // 频谱色阶（画频谱图用）
@@ -303,7 +574,7 @@ object SpectrogramGenerator {
         val maxDb = 0.0f
 
         // ───────── 有损编码痕迹检测 ─────────
-        val evidence = analyzeSpectrum(sumPower, numFrames, sampleRate)
+        val evidence = analyzeSpectrum(analysisPower, numFrames, sampleRate)
         val cutoffHz = evidence.displayCutoffHz
         val cutKhz = String.format("%.1f", cutoffHz / 1000.0f)
         val kind = classifyFormat(mime, file.name)
@@ -384,7 +655,7 @@ object SpectrogramGenerator {
         bmp.setPixels(pixels, 0, numFrames, 0, 0, numFrames, numBins)
 
         Log.d(TAG, "Acoustic detection completed: $cutoffHz Hz -> $verdict")
-        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless, sampleRate, level)
+        return@withContext Result(bmp, cutoffHz, verdict, verdictDetails, isLossless, sampleRate, level, fullTrack, durationUs)
     }
 
     private fun fft(re: FloatArray, im: FloatArray) {

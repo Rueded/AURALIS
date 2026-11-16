@@ -193,6 +193,8 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
     var showSleepTimerDialog by remember { mutableStateOf(false) }
 
     val mainListState = rememberLazyListState()
+    var hasInitialScrolledToCurrent by rememberSaveable { mutableStateOf(false) }
+    var lastSortKey by rememberSaveable { mutableStateOf("${sortType}_${isAscending}") }
     var allowMarquee by remember { mutableStateOf(true) }
     val isScrolling = mainListState.isScrollInProgress
 
@@ -1020,9 +1022,25 @@ fun MusicAppScreen(shouldOpenPlayer: MutableState<Boolean>) {
                                     } else {
                                         val listState = if (pageIndex == 0) mainListState else rememberLazyListState()
 
+                                        // ✅ 冷启动 / 退出重开：当曲库与已保存的当前播放歌曲就绪时，自动定位滚动到该歌曲
+                                        LaunchedEffect(currentProcessedSongs, currentAudioPath) {
+                                            if (pageIndex == 0 && !hasInitialScrolledToCurrent && currentProcessedSongs.isNotEmpty() && currentAudioPath.isNotEmpty()) {
+                                                val targetIndex = currentProcessedSongs.indexOfFirst { it.data == currentAudioPath }
+                                                if (targetIndex >= 0) {
+                                                    listState.scrollToItem(maxOf(0, targetIndex - 2))
+                                                    hasInitialScrolledToCurrent = true
+                                                }
+                                            }
+                                        }
+
+                                        // ✅ 仅在用户主动改变排序条件时才回滚至顶部，避免冷启动首次合成时与自动定位冲突
                                         LaunchedEffect(sortType, isAscending) {
-                                            if (listState.firstVisibleItemIndex > 0) {
-                                                listState.scrollToItem(0)
+                                            val newSortKey = "${sortType}_${isAscending}"
+                                            if (newSortKey != lastSortKey) {
+                                                lastSortKey = newSortKey
+                                                if (listState.firstVisibleItemIndex > 0) {
+                                                    listState.scrollToItem(0)
+                                                }
                                             }
                                         }
 

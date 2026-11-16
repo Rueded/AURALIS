@@ -109,7 +109,12 @@
     <string name="song_details_title">Song Details</string>
     <string name="acoustic_audit_title">🔍 Acoustic Quality Audit</string>
     <string name="decoding_pcm_fft">Decoding PCM and computing FFT spectrogram...</string>
+    <string name="decoding_pcm_fft_progress">Decoding &amp; analyzing full track... %1$d%%</string>
     <string name="action_run_acoustic_audit">Run acoustic audit (Spek)</string>
+    <string name="action_full_track_spectrogram">Want to see full track dynamics? Tap for full-track deep analysis</string>
+    <string name="spectrogram_quick_mode_badge">Quick Sample (First 20s)</string>
+    <string name="spectrogram_full_mode_badge">Full-Track Deep Analysis</string>
+    <string name="spectrogram_viewer_gesture_hint">Pinch to zoom · Drag to pan · Double-tap to reset</string>
     <string name="spectrogram_disclaimer">※ Acoustic features are auto-decoded and analyzed by Auralis On-Demand Spectrogram. Silent passages or certain classic tracks may cause slight inaccuracies — results are for reference only.</string>
     <string name="action_close">Close</string>
     <string name="confirm_delete_lyrics_cache_title">Delete lyrics &amp; cover cache?</string>

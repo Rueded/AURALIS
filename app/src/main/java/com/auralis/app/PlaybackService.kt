@@ -143,9 +143,12 @@ class PlaybackService : MediaLibraryService() {
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean
             ): AudioSink {
+                // 彻底修复三星 S22U 等机型非 Hi-Res 歌曲音质全损/炸音/破音：
+                // 1. 关闭 Float 输出，让 16-bit 音频走原生 16-bit PCM，避免三星 AudioFlinger 浮点混音 DSP 削波失真；
+                // 2. 关闭 AudioTrack 原生变速参数，避免三星 HAL 硬件重采样器引入杂音。
                 val originalSink = DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(true)
-                    .setEnableAudioTrackPlaybackParams(true)
+                    .setEnableFloatOutput(false)
+                    .setEnableAudioTrackPlaybackParams(false)
                     .build()
                 return VisualizerInterceptingAudioSink(originalSink, context)
             }
@@ -169,38 +172,45 @@ class PlaybackService : MediaLibraryService() {
 
         builtPlayer.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(sessionId: Int) {
-                audioSessionId = sessionId
-                _audioSessionIdState.value = sessionId
-                initEqualizer(sessionId) // ✅ EQ 跟随 session 重绑
+                if (!isUsingPlayer2) {
+                    audioSessionId = sessionId
+                    _audioSessionIdState.value = sessionId
+                    initEqualizer(sessionId) // ✅ EQ 跟随 session 重绑
+                }
             }
 
             // 暂停、切歌时顺手保存一次现场：onDestroy/onTaskRemoved 不一定总会被系统调用到，
-            // 这里多存几次是廉价操作（SharedPreferences 小 JSON），换来更保险的"记忆"体验。
+            // 只有当非淡出过渡阶段时才保存，防止淡出时的旧状态覆盖新歌
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying) savePlaybackState()
+                if (!isPlaying && !isCrossfading && !isUsingPlayer2) savePlaybackState(builtPlayer)
                 updateWidgetState()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                savePlaybackState()
+                if (!isCrossfading && !isUsingPlayer2) savePlaybackState(builtPlayer)
                 updateWidgetState()
             }
 
-            // 标题/艺术家有时会在同一个 mediaItem 内部更新（比如封面/歌词元数据异步补全），
-            // 不属于"切歌"，但小组件上显示的文字也得跟着刷新
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
                 updateWidgetState()
             }
         })
         player2?.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(sessionId: Int) {
-                audioSessionId = sessionId
-                _audioSessionIdState.value = sessionId
+                if (isUsingPlayer2) {
+                    audioSessionId = sessionId
+                    _audioSessionIdState.value = sessionId
+                    initEqualizer(sessionId)
+                }
             }
-            // 淡入淡出之后会话的播放器会换成 player2，之后的播放/切歌事件都来自它，
-            // 小组件也要跟着刷新（updateWidgetState 读取的是当前会话的播放器）
-            override fun onIsPlayingChanged(isPlaying: Boolean) { updateWidgetState() }
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) { updateWidgetState() }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying && !isCrossfading && isUsingPlayer2) savePlaybackState(player2)
+                updateWidgetState()
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (!isCrossfading && isUsingPlayer2) savePlaybackState(player2)
+                updateWidgetState()
+            }
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) { updateWidgetState() }
         })
 
@@ -272,13 +282,13 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // 用户从最近任务里划掉 App 时，onDestroy 不一定会被系统立刻调用，
-        // 这里兜底先把当前队列/进度存一份，防止真被系统回收时丢状态。
-        savePlaybackState()
+        // 这里兜底先把当前真正活跃播放器的队列/进度存一份，防止真被系统回收时丢状态。
+        savePlaybackState(getActivePlayer())
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        savePlaybackState()
+        savePlaybackState(getActivePlayer())
         instance = null
         crossfadeHandler.removeCallbacksAndMessages(null) // 轮询 + 还没执行的延迟换播放器/渐变，一起取消
         systemLyricsOverlay?.stop(); systemLyricsOverlay = null
@@ -420,9 +430,16 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun savePlaybackState() {
+    /** 获取当前真正处于主导/活跃地位的 ExoPlayer（避免双播放器淡入淡出切换后读错旧实例） */
+    private fun getActivePlayer(): ExoPlayer? {
+        val sessionP = mediaSession?.player as? ExoPlayer
+        if (sessionP != null) return sessionP
+        return if (isUsingPlayer2) (player2 ?: player) else (player ?: player2)
+    }
+
+    private fun savePlaybackState(targetPlayer: ExoPlayer? = null) {
         try {
-            val p = player ?: return
+            val p = targetPlayer ?: getActivePlayer() ?: return
             val count = p.mediaItemCount
             if (count == 0) return // 没有队列（比如从没放过歌），不覆盖上次保存的状态
 
@@ -529,12 +546,17 @@ class PlaybackService : MediaLibraryService() {
     fun initEqualizer(sessionId: Int) {
         if (sessionId == 0) return
         try {
+            val prefs = getSharedPreferences("MusicSyncPrefs", Context.MODE_PRIVATE)
+            val eqEnabled = prefs.getBoolean("eq_enabled", false)
+            val bbEnabled = prefs.getBoolean("bass_boost_enabled", false)
+            val ldEnabled = prefs.getBoolean("loudness_enabled", false)
+
             equalizer?.release()
-            equalizer = android.media.audiofx.Equalizer(0, sessionId).apply { enabled = true }
+            equalizer = android.media.audiofx.Equalizer(0, sessionId).apply { enabled = eqEnabled }
             bassBoost?.release()
-            bassBoost = android.media.audiofx.BassBoost(0, sessionId).apply { enabled = true }
+            bassBoost = android.media.audiofx.BassBoost(0, sessionId).apply { enabled = bbEnabled }
             loudnessEnhancer?.release()
-            loudnessEnhancer = android.media.audiofx.LoudnessEnhancer(sessionId).apply { enabled = true }
+            loudnessEnhancer = android.media.audiofx.LoudnessEnhancer(sessionId).apply { enabled = ldEnabled }
             restoreEqSettings()
             Log.d("PlaybackService", "✅ EQ 初始化成功 sessionId=$sessionId")
         } catch (e: Exception) {
@@ -787,10 +809,13 @@ class PlaybackService : MediaLibraryService() {
                 isUsingPlayer2 = !isUsingPlayer2
                 shadowPlayer.volume = 0f
                 shadowPlayer.play()
+                // 立即保存新接管播放器 shadowPlayer 的完整队列与新歌索引，即使在渐变中途划掉后台也绝不回退或丢队列
+                savePlaybackState(shadowPlayer)
                 crossfadeHandler.postDelayed({
                     try {
                         mediaSession?.player = shadowPlayer
                         Log.i(fadeTag, "🔁 会话播放器已切到 ${pid(shadowPlayer)}，新歌=${shadowPlayer.currentMediaItem?.mediaId}")
+                        savePlaybackState(shadowPlayer)
                         val idx = mainPlayer.currentMediaItemIndex
                         if (idx + 1 < mainPlayer.mediaItemCount)
                             mainPlayer.removeMediaItems(idx + 1, mainPlayer.mediaItemCount)
@@ -855,6 +880,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 fadeOutPlayer.setAudioAttributes(fadeOutPlayer.audioAttributes, true)
                 fadeOutPlayer.volume = targetVolume
+                savePlaybackState(fadeInPlayer)
             } catch (e: Exception) {
                 Log.e(fadeTag, "收尾出错: ${e.message}", e)
             } finally {

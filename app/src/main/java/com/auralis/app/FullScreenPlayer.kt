@@ -23,6 +23,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,6 +32,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -63,6 +66,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -208,7 +213,10 @@ fun FullScreenPlayer(
         var lyricsCandidatesGrouped by remember { mutableStateOf<Map<String, List<LyricCandidate>>>(emptyMap()) }
 
         var isDetectingSpectrogram by remember { mutableStateOf(false) }
+        var isFullTrackDetecting by remember { mutableStateOf(false) }
+        var detectionProgress by remember { mutableFloatStateOf(0f) }
         var spectrogramResult by remember { mutableStateOf<SpectrogramGenerator.Result?>(null) }
+        var showSpectrogramViewer by remember { mutableStateOf(false) }
 
         val prefKeySkipDelete  = "skip_delete_lyrics_confirm"
         var skipDeleteConfirm  by remember { mutableStateOf(prefs.getBoolean(prefKeySkipDelete,  false)) }
@@ -220,6 +228,10 @@ fun FullScreenPlayer(
 
         LaunchedEffect(audioPath) {
             spectrogramResult = null
+            isDetectingSpectrogram = false
+            isFullTrackDetecting = false
+            detectionProgress = 0f
+            showSpectrogramViewer = false
         }
 
         val doDeleteLyrics: () -> Unit = {
@@ -1590,24 +1602,47 @@ fun FullScreenPlayer(
                     Text(stringResource(R.string.acoustic_audit_title), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(8.dp))
 
-                    if (spectrogramResult == null) {
-                        if (isDetectingSpectrogram) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                    if (isDetectingSpectrogram) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (isFullTrackDetecting) {
+                                LinearProgressIndicator(
+                                    progress = { detectionProgress },
+                                    modifier = Modifier.fillMaxWidth(0.85f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    stringResource(R.string.decoding_pcm_fft_progress, (detectionProgress * 100).toInt()),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
                                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.height(12.dp))
                                 Text(stringResource(R.string.decoding_pcm_fft), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        } else {
+                        }
+                    } else if (spectrogramResult == null) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = {
                                     isDetectingSpectrogram = true
+                                    isFullTrackDetecting = false
                                     scope.launch {
-                                        val res = SpectrogramGenerator.generate(audioPath, context)
-                                        spectrogramResult = res
-                                        isDetectingSpectrogram = false
+                                        try {
+                                            val res = SpectrogramGenerator.generate(audioPath, context, fullTrack = false)
+                                            spectrogramResult = res
+                                            if (res == null) {
+                                                Toast.makeText(context, context.getString(R.string.parse_detail_failed, "Spek"), Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("FullScreenPlayer", "Spek failed: ${e.message}")
+                                        } finally {
+                                            isDetectingSpectrogram = false
+                                        }
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -1616,6 +1651,44 @@ fun FullScreenPlayer(
                                 Icon(Icons.Default.Search, null)
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.action_run_acoustic_audit))
+                            }
+
+                            Spacer(Modifier.height(4.dp))
+
+                            TextButton(
+                                onClick = {
+                                    isDetectingSpectrogram = true
+                                    isFullTrackDetecting = true
+                                    detectionProgress = 0f
+                                    scope.launch {
+                                        try {
+                                            val res = SpectrogramGenerator.generate(
+                                                audioPath = audioPath,
+                                                context = context,
+                                                fullTrack = true,
+                                                onProgress = { p -> detectionProgress = p }
+                                            )
+                                            spectrogramResult = res
+                                            if (res == null) {
+                                                Toast.makeText(context, context.getString(R.string.parse_detail_failed, "Spek"), Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("FullScreenPlayer", "Full Spek failed: ${e.message}")
+                                        } finally {
+                                            isDetectingSpectrogram = false
+                                            isFullTrackDetecting = false
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.GraphicEq, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.action_full_track_spectrogram),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     } else {
@@ -1656,15 +1729,30 @@ fun FullScreenPlayer(
                             Spacer(Modifier.height(12.dp))
 
                             // High-res Spek-style color map bitmap visualizer
-                            // 之前这里的写法是拿位图高度硬套 22.05kHz 的比例算 Nyquist，
-                            // 遇到 48kHz / 96kHz 的曲子换算出来的值就是错的，
-                            // 现在直接用真实采样率算，下面的坐标轴标签也一并改成跟着它动态变化。
                             val axisNyquistKhz = res.sampleRate / 2000.0f
-                            Text(
-                                text = stringResource(R.string.spectrogram_cutoff_label, String.format("%.1f", res.cutoffHz / 1000.0f), String.format("%.1f", axisNyquistKhz)),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            val modeTag = if (res.isFullTrack) stringResource(R.string.spectrogram_full_mode_badge) else stringResource(R.string.spectrogram_quick_mode_badge)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.spectrogram_cutoff_label, String.format("%.1f", res.cutoffHz / 1000.0f), String.format("%.1f", axisNyquistKhz)),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                                ) {
+                                    Text(
+                                        text = modeTag,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(8.dp))
 
                             Box(
@@ -1674,6 +1762,7 @@ fun FullScreenPlayer(
                                     .clip(RoundedCornerShape(12.dp))
                                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
                                     .background(Color(0xFF0A0A1E))
+                                    .clickable { showSpectrogramViewer = true }
                             ) {
                                 Image(
                                     bitmap = res.bitmap.asImageBitmap(),
@@ -1705,6 +1794,66 @@ fun FullScreenPlayer(
                                 }
                             }
 
+                            if (!res.isFullTrack) {
+                                Spacer(Modifier.height(10.dp))
+                                Surface(
+                                    onClick = {
+                                        isDetectingSpectrogram = true
+                                        isFullTrackDetecting = true
+                                        detectionProgress = 0f
+                                        scope.launch {
+                                            try {
+                                                val fullRes = SpectrogramGenerator.generate(
+                                                    audioPath = audioPath,
+                                                    context = context,
+                                                    fullTrack = true,
+                                                    onProgress = { p -> detectionProgress = p }
+                                                )
+                                                if (fullRes != null) {
+                                                    spectrogramResult = fullRes
+                                                } else {
+                                                    Toast.makeText(context, context.getString(R.string.parse_detail_failed, "Spek"), Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("FullScreenPlayer", "Full Spek failed: ${e.message}")
+                                            } finally {
+                                                isDetectingSpectrogram = false
+                                                isFullTrackDetecting = false
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.GraphicEq,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            text = stringResource(R.string.action_full_track_spectrogram),
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
                             Spacer(Modifier.height(8.dp))
                             Text(stringResource(R.string.spectrogram_disclaimer), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                         }
@@ -1715,6 +1864,13 @@ fun FullScreenPlayer(
                 FilledTonalButton(onClick = { showInfoDialog = false }) { Text(stringResource(R.string.action_close)) }
             }
         )
+        if (showSpectrogramViewer && spectrogramResult != null) {
+            FullscreenSpectrogramViewer(
+                result = spectrogramResult!!,
+                title = title,
+                onDismiss = { showSpectrogramViewer = false }
+            )
+        }
         if (showEqDialog) EqDialog(onDismiss = { showEqDialog = false })
         if (showShareToNearbySheet) {
             var currentSong by remember(audioPath) { mutableStateOf<Song?>(null) }
@@ -2525,6 +2681,199 @@ fun LyricCandidateRow(
                     contentDescription = stringResource(R.string.action_select_and_apply),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun FullscreenSpectrogramViewer(
+    result: SpectrogramGenerator.Result,
+    title: String,
+    onDismiss: () -> Unit
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF07070F))
+                .systemBarsPadding()
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Top header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.action_close),
+                            tint = Color.White
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val axisNyquistKhz = result.sampleRate / 2000.0f
+                        val modeTag = if (result.isFullTrack) stringResource(R.string.spectrogram_full_mode_badge) else stringResource(R.string.spectrogram_quick_mode_badge)
+                        Text(
+                            text = "$modeTag · ${String.format("%.1f", result.cutoffHz / 1000.0f)} kHz / Nyquist ${String.format("%.1f", axisNyquistKhz)} kHz",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f),
+                            maxLines = 1
+                        )
+                    }
+                    if (scale > 1.05f) {
+                        TextButton(onClick = { scale = 1f; offset = Offset.Zero }) {
+                            Text("1x", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Interactive Zoomable Spectrogram Viewport
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF030308))
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    if (scale > 1.2f) {
+                                        scale = 1f
+                                        offset = Offset.Zero
+                                    } else {
+                                        scale = 2.5f
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = (scale * zoom).coerceIn(1f, 6f)
+                                scale = newScale
+                                val maxOffsetX = (size.width.toFloat() * (newScale - 1f)) / 2f
+                                val maxOffsetY = (size.height.toFloat() * (newScale - 1f)) / 2f
+                                offset = if (newScale > 1f) {
+                                    Offset(
+                                        x = (offset.x + pan.x).coerceIn(-maxOffsetX, maxOffsetX),
+                                        y = (offset.y + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                                    )
+                                } else {
+                                    Offset.Zero
+                                }
+                            }
+                        }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offset.x
+                                translationY = offset.y
+                            }
+                    ) {
+                        Image(
+                            bitmap = result.bitmap.asImageBitmap(),
+                            contentDescription = "Spek Spectrogram",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.FillBounds
+                        )
+
+                        // High precision frequency grid lines
+                        val axisNyquistKhz = result.sampleRate / 2000.0f
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            for (step in 4 downTo 0) {
+                                val khz = axisNyquistKhz * step / 4f
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${String.format("%.1f", khz)} kHz",
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        modifier = Modifier.width(54.dp)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(0.5.dp)
+                                            .background(Color.White.copy(alpha = 0.2f))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom verdict and hint
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    val badgeColor = when (result.level) {
+                        0 -> Color(0xFF4CAF50)
+                        1 -> Color(0xFFFFA726)
+                        else -> Color(0xFFEF5350)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (result.level == 0) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = badgeColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = result.verdict,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = badgeColor
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = result.verdictDetails,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.spectrogram_viewer_gesture_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.45f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
